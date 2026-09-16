@@ -324,7 +324,7 @@ function printCustomerStatement(customerId, range) {
     <div class="pr-title">ACCOUNT STATEMENT${range ? ' — ' + esc(range.label()) : ' — FULL LEDGER'}</div>
     <div class="pr-meta">
       <div><div class="pr-cust">${esc(c.name)}</div>${esc(c.phone || '')}<br>${esc(c.address || '')}</div>
-      <div style="text-align:right">Statement Date: <b>${fmtDate(todayISO())}</b><br>Rate: <b>${fmtMoney(Biz.rate())} / KG</b><br>
+      <div style="text-align:right">Statement Date: <b>${fmtDate(todayISO())}</b><br>Rate: <b>${(acc.rateMix && acc.rateMix.length ? acc.rateMix.map(m => fmtMoney(m.rate)).join(' + ') : fmtMoney(Biz.rate()))} / KG</b><br>
         Total Received: <b>${fmtKg(acc.kgTotal)}</b></div>
     </div>
     <table class="pr-tbl">

@@ -275,7 +275,7 @@ function reportsPaint() {
     }))) : '<div class="empty"><div class="empty-ico">💵</div><div>Koi collection nahi</div></div>'}
           <div class="divider"></div>
           <div class="kv"><span>Total Collected</span><b class="t-ok">${fmtMoney(total)}</b></div>
-          <div class="kv"><span>Equivalent KG (rate ${fmtMoney(Biz.rate())})</span><b>${fmtKg(round1(total / Biz.rate()))}</b></div>
+          <div class="kv"><span>Equivalent KG (payments ke record se)</span><b>${fmtKg(round1(pays.reduce((a, p) => a + num(p.kgCovered), 0)))}</b></div>
           </div>
         </div>
       </div>`;

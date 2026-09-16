@@ -552,7 +552,9 @@ function printCustomInvoice(saleId, cfg) {
   const advHeld = round2(acc.advance);
   const totalPayable = round2(Math.max(0, grossPayable - advHeld));
   const balance = round2(Math.max(0, totalPayable - paidNow));
-  const balanceKg = round1(balance / rate);
+  /* rate-aware: is bill ka KG apne rate par + purane bills ke KG apne rate par */
+  const settledKg = round1((paidNow + Math.min(advHeld, grossPayable)) / rate);
+  const balanceKg = round1(Math.max(0, kg + otherKg - settledKg));
 
   /* kg breakdown per category for the bill */
   const cats = Biz.catKeys().map(k => ({ k, kg: Biz.saleCatKg(s, k) })).filter(x => x.kg > 0);

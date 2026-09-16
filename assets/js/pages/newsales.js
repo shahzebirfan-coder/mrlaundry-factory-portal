@@ -18,7 +18,8 @@ const NS = {
   note: '',
   paymentMode: 'Credit',
   advance: '',
-  tab: 'A'
+  tab: 'A',
+  rate: ''   // is bill ka rate (khali = default rate)
 };
 
 function renderNewSales(param) {
@@ -47,7 +48,7 @@ function nsPaint() {
   if (!el) return;
   const cats = Biz.categories();
   const products = DB.all('products').filter(p => p.active !== false);
-  const rate = Biz.rate();
+  const rate = num(NS.rate) || Biz.rate();   // is bill ka rate (purane bill ke liye badla ja sakta hai)
   const totalKg = round1(NS.lines.reduce((a, l) => a + num(l.kg), 0));
   const totalPcs = NS.lines.reduce((a, l) => a + num(l.pcs), 0);
   const amount = round2(totalKg * rate);
@@ -183,7 +184,12 @@ function nsPaint() {
         <div class="kv"><span>Delivery Date</span><b class="t-warn">Pending (baad mein)</b></div>
         <div class="kv"><span>Total KG</span><b>${fmtKg(totalKg)}</b></div>
         <div class="kv"><span>Total Pieces</span><b>${fmtNum(totalPcs)}</b></div>
-        <div class="kv"><span>Rate</span><b style="cursor:pointer" id="nsRateEdit" title="Rate edit karein">${fmtMoney(rate)} / kg ✏️</b></div>
+        <div class="kv"><span>Is bill ka Rate / kg</span>
+          <span class="row" style="gap:6px;justify-content:flex-end">
+            <input type="number" step="1" min="1" class="inp inp-xs t-right" style="width:86px" id="nsRateInp" value="${num(rate)}"/>
+            <span class="tiny muted" style="cursor:pointer;text-decoration:underline" id="nsRateEdit" title="Default rate (sab naye bills) change karein">default ✏️</span>
+          </span></div>
+        ${round2(num(rate)) !== round2(Biz.rate()) ? `<div class="fld-hint">⚠️ Is bill par purana rate <b>${fmtMoney(num(rate))}/kg</b> lagega (default ${fmtMoney(Biz.rate())}/kg). Save ke baad form wapis default par aa jayega.</div>` : ''}
         <div class="kv total"><span>Tentative Amount</span><b>${fmtMoney(amount)}</b></div>
 
         <div class="note-box warn tiny mt10">
@@ -297,6 +303,19 @@ function nsBind() {
 
   const nr = $('#nsRateEdit'); if (nr) nr.onclick = () => openRateForm();
   const ncr = $('#nsCatRate'); if (ncr) ncr.onclick = () => openRateForm();
+  /* is bill ka rate — purane record (e.g. Rs.200/kg) enter karne ke liye */
+  const nri = $('#nsRateInp');
+  if (nri) {
+    nri.onchange = e => {
+      const v = num(e.target.value);
+      NS.rate = v > 0 ? v : '';
+      if (NS.rate && round2(NS.rate) !== round2(Biz.rate())) {
+        toast('Is bill ka rate ' + fmtMoney(NS.rate) + '/kg set — sirf isi bill par lagega', 'info', 3000);
+      }
+      nsPaint();
+    };
+    nri.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } };
+  }
 
   /* save buttons */
   const sv = $('#nsSaveSlip'); if (sv) sv.onclick = () => nsSave('slip');
@@ -338,7 +357,7 @@ function nsAddLine() {
 async function nsSave(mode) {
   if (!NS.customerId) return toast('Customer select karein', 'error');
   if (!NS.lines.length) return toast('Kam az kam ek item / KG add karein', 'error');
-  const rate = Biz.rate();
+  const rate = num(NS.rate) || Biz.rate();   // is bill ka rate
   const kgTotal = round1(NS.lines.reduce((a, l) => a + num(l.kg), 0));
   const pieces = NS.lines.reduce((a, l) => a + num(l.pcs), 0);
   const sale = {
@@ -372,6 +391,7 @@ async function nsSave(mode) {
 
   // reset cart but keep customer for fast repeat entry
   NS.lines = []; NS._sel = {}; NS.advance = ''; NS.note = '';
+  NS.rate = '';   // rate override sirf usi bill ke liye tha
 
   if (mode === 'slip') {
     printSaleSlip(sale.id);
