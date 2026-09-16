@@ -1768,10 +1768,24 @@ const Biz = {
       paid: round2(pays.reduce((s, p) => s + num(p.amount), 0)),
       balance: round2(sales.reduce((s, x) => s + x._due, 0)),
       advance,
-      kgPaid: 0, kgBalance: 0
+      kgPaid: 0, kgBalance: 0, rateMix: [], avgRate: 0
     };
-    stats.kgPaid = rate ? round1(stats.paid / rate) : 0;
-    stats.kgBalance = rate ? round1(stats.balance / rate) : 0;
+    /* KG accounting RATE-AWARE: har bill apne rate par convert hota hai.
+       Purane bill Rs.200/kg par, naye Rs.320/kg par — mix ho to bhi theek. */
+    stats.kgPaid = round1(sales.reduce((a, x) => a + num(x._kgApplied), 0));
+    stats.kgBalance = round1(sales.reduce((a, x) => a + num(x._kgDue), 0));
+    const mixMap = {};
+    sales.forEach(x => {
+      if (num(x._due) <= 0.009) return;
+      const r = round2(this.saleRate(x));
+      const k = String(r);
+      if (!mixMap[k]) mixMap[k] = { rate: r, kg: 0, amount: 0, count: 0, invoiceNo: x.invoiceNo, date: x.entryDate };
+      mixMap[k].kg = round1(mixMap[k].kg + num(x._kgDue));
+      mixMap[k].amount = round2(mixMap[k].amount + num(x._due));
+      mixMap[k].count++;
+    });
+    stats.rateMix = Object.keys(mixMap).map(k => mixMap[k]).sort((a, b) => b.rate - a.rate);
+    stats.avgRate = stats.kgTotal ? round2(stats.amount / stats.kgTotal) : rate;
     stats.outstandingInvoices = sales.filter(x => x._due > 0.009).length;
 
     // ---- per-sale view for display (uses cached computed fields) ----
@@ -1801,7 +1815,8 @@ const Biz = {
       } else {
         const p = e.p;
         const amt = num(p.amount), r = num(p.rate) || rate;
-        const kgCut = amtBal > 0 ? round1(Math.min(kgBal, amt / r)) : 0;
+        /* KG cut: payment record par jo KG cover hui (FIFO, rate-aware) — purana rate ho to wahi */
+        const kgCut = amtBal > 0 ? round1(Math.min(kgBal, num(p.kgCovered) || (amt / r))) : 0;
         kgBal = round1(Math.max(0, kgBal - kgCut));
         amtBal = round2(amtBal - amt);
         rows.push({
@@ -1904,7 +1919,8 @@ const Biz = {
     return {
       ok: true, records, appliedTo,
       advance: acc.advance, balance: acc.balance,
-      totalAmount: amount, totalKg: kg != null ? kg : round1(amount / rate)
+      totalAmount: amount,
+      totalKg: kg != null ? kg : round1(appliedTo.reduce((a, x) => a + num(x.kg), 0) + (Math.max(0, left) / rate))
     };
   },
 
@@ -2807,7 +2823,8 @@ const NS = {
   note: '',
   paymentMode: 'Credit',
   advance: '',
-  tab: 'A'
+  tab: 'A',
+  rate: ''   // is bill ka rate (khali = default rate)
 };
 
 function renderNewSales(param) {
@@ -2836,7 +2853,7 @@ function nsPaint() {
   if (!el) return;
   const cats = Biz.categories();
   const products = DB.all('products').filter(p => p.active !== false);
-  const rate = Biz.rate();
+  const rate = num(NS.rate) || Biz.rate();   // is bill ka rate (purane bill ke liye badla ja sakta hai)
   const totalKg = round1(NS.lines.reduce((a, l) => a + num(l.kg), 0));
   const totalPcs = NS.lines.reduce((a, l) => a + num(l.pcs), 0);
   const amount = round2(totalKg * rate);
@@ -2972,7 +2989,12 @@ function nsPaint() {
         <div class="kv"><span>Delivery Date</span><b class="t-warn">Pending (baad mein)</b></div>
         <div class="kv"><span>Total KG</span><b>${fmtKg(totalKg)}</b></div>
         <div class="kv"><span>Total Pieces</span><b>${fmtNum(totalPcs)}</b></div>
-        <div class="kv"><span>Rate</span><b style="cursor:pointer" id="nsRateEdit" title="Rate edit karein">${fmtMoney(rate)} / kg ✏️</b></div>
+        <div class="kv"><span>Is bill ka Rate / kg</span>
+          <span class="row" style="gap:6px;justify-content:flex-end">
+            <input type="number" step="1" min="1" class="inp inp-xs t-right" style="width:86px" id="nsRateInp" value="${num(rate)}"/>
+            <span class="tiny muted" style="cursor:pointer;text-decoration:underline" id="nsRateEdit" title="Default rate (sab naye bills) change karein">default ✏️</span>
+          </span></div>
+        ${round2(num(rate)) !== round2(Biz.rate()) ? `<div class="fld-hint">⚠️ Is bill par purana rate <b>${fmtMoney(num(rate))}/kg</b> lagega (default ${fmtMoney(Biz.rate())}/kg). Save ke baad form wapis default par aa jayega.</div>` : ''}
         <div class="kv total"><span>Tentative Amount</span><b>${fmtMoney(amount)}</b></div>
 
         <div class="note-box warn tiny mt10">
@@ -3086,6 +3108,19 @@ function nsBind() {
 
   const nr = $('#nsRateEdit'); if (nr) nr.onclick = () => openRateForm();
   const ncr = $('#nsCatRate'); if (ncr) ncr.onclick = () => openRateForm();
+  /* is bill ka rate — purane record (e.g. Rs.200/kg) enter karne ke liye */
+  const nri = $('#nsRateInp');
+  if (nri) {
+    nri.onchange = e => {
+      const v = num(e.target.value);
+      NS.rate = v > 0 ? v : '';
+      if (NS.rate && round2(NS.rate) !== round2(Biz.rate())) {
+        toast('Is bill ka rate ' + fmtMoney(NS.rate) + '/kg set — sirf isi bill par lagega', 'info', 3000);
+      }
+      nsPaint();
+    };
+    nri.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } };
+  }
 
   /* save buttons */
   const sv = $('#nsSaveSlip'); if (sv) sv.onclick = () => nsSave('slip');
@@ -3127,7 +3162,7 @@ function nsAddLine() {
 async function nsSave(mode) {
   if (!NS.customerId) return toast('Customer select karein', 'error');
   if (!NS.lines.length) return toast('Kam az kam ek item / KG add karein', 'error');
-  const rate = Biz.rate();
+  const rate = num(NS.rate) || Biz.rate();   // is bill ka rate
   const kgTotal = round1(NS.lines.reduce((a, l) => a + num(l.kg), 0));
   const pieces = NS.lines.reduce((a, l) => a + num(l.pcs), 0);
   const sale = {
@@ -3161,6 +3196,7 @@ async function nsSave(mode) {
 
   // reset cart but keep customer for fast repeat entry
   NS.lines = []; NS._sel = {}; NS.advance = ''; NS.note = '';
+  NS.rate = '';   // rate override sirf usi bill ke liye tha
 
   if (mode === 'slip') {
     printSaleSlip(sale.id);
@@ -3749,7 +3785,9 @@ function printCustomInvoice(saleId, cfg) {
   const advHeld = round2(acc.advance);
   const totalPayable = round2(Math.max(0, grossPayable - advHeld));
   const balance = round2(Math.max(0, totalPayable - paidNow));
-  const balanceKg = round1(balance / rate);
+  /* rate-aware: is bill ka KG apne rate par + purane bills ke KG apne rate par */
+  const settledKg = round1((paidNow + Math.min(advHeld, grossPayable)) / rate);
+  const balanceKg = round1(Math.max(0, kg + otherKg - settledKg));
 
   /* kg breakdown per category for the bill */
   const cats = Biz.catKeys().map(k => ({ k, kg: Biz.saleCatKg(s, k) })).filter(x => x.kg > 0);
@@ -4271,7 +4309,7 @@ function printCustomerStatement(customerId, range) {
     <div class="pr-title">ACCOUNT STATEMENT${range ? ' — ' + esc(range.label()) : ' — FULL LEDGER'}</div>
     <div class="pr-meta">
       <div><div class="pr-cust">${esc(c.name)}</div>${esc(c.phone || '')}<br>${esc(c.address || '')}</div>
-      <div style="text-align:right">Statement Date: <b>${fmtDate(todayISO())}</b><br>Rate: <b>${fmtMoney(Biz.rate())} / KG</b><br>
+      <div style="text-align:right">Statement Date: <b>${fmtDate(todayISO())}</b><br>Rate: <b>${(acc.rateMix && acc.rateMix.length ? acc.rateMix.map(m => fmtMoney(m.rate)).join(' + ') : fmtMoney(Biz.rate()))} / KG</b><br>
         Total Received: <b>${fmtKg(acc.kgTotal)}</b></div>
     </div>
     <table class="pr-tbl">
@@ -4466,14 +4504,22 @@ function openPaymentForm(customerId, opts) {
   const c = DB.get('customers', cid);
   let acc = Biz.customerAccount(cid);
   let mode = 'amount'; // amount | kg
+  const dueList = Biz.dueSales(cid);
+  const mix = acc.rateMix || [];
+  // default rate = sab se purane pending bill ka rate (FIFO mein pehle wahi lagta hai)
+  const defRate = dueList.length ? (num(dueList[0].rate) || Biz.rate()) : Biz.rate();
 
   const body = `
     <div class="note-box info tiny mb10">
-      <b>${esc(c.name)}</b> · Rate <b>${fmtMoney(Biz.rate())}/kg</b><br>
+      <b>${esc(c.name)}</b> · ${mix.length
+        ? 'Bills ka rate: ' + mix.map(m => '<b>' + fmtMoney(m.rate) + '</b>').join(' + ') + ' /kg'
+        : 'Rate <b>' + fmtMoney(Biz.rate()) + '/kg</b>'}<br>
       Total received: <b>${fmtKg(acc.kgTotal)}</b> (${fmtMoney(acc.amount)}) ·
       Paid: <b>${fmtMoney(acc.paid)}</b> (${fmtKg(acc.kgPaid)}) ·
       <b class="${acc.balance > 0.009 ? 't-bad' : 't-ok'}">Balance: ${fmtMoney(acc.balance)} (${fmtKg(acc.kgBalance)})</b>
       ${acc.advance > 0 ? ' · Advance: <b>' + fmtMoney(acc.advance) + '</b>' : ''}
+      ${mix.length > 1 ? '<div style="margin-top:4px">⚠️ Pending bills <b>2 alag rate</b> par hain (' +
+          mix.map(m => fmtMoney(m.rate) + ' × ' + fmtKg(m.kg)).join(' · ') + ') — neeche <b>rate</b> khud check kar lein.</div>' : ''}
     </div>
 
     <div class="grid g3" style="align-items:end">
@@ -4488,10 +4534,14 @@ function openPaymentForm(customerId, opts) {
       <button class="seg-btn" id="pmKg" data-pm="kg">⚖️ KG se (kitne KG delivered)</button>
     </div>
 
-    <div class="grid g2 mt10">
-      <label class="fld"><span id="pfAmtLbl">Amount Received (Rs) <b class="req">*</b></span>
+    <div class="tiny muted" style="margin-top:-6px">Purani payment record kar rahe hain? <b>Date</b> bhi asli (purani) rakhein.</div>
+
+    <div class="grid g3 mt10" style="gap:10px;align-items:end">
+      <label class="fld mb0"><span id="pfAmtLbl">Amount Received (Rs) <b class="req">*</b></span>
         <input type="number" step="1" class="inp" id="pfAmount" placeholder="0"/></label>
-      <label class="fld"><span id="pfKgLbl">Equivalent KG (auto)</span>
+      <label class="fld mb0"><span>Kis rate par? (Rs / kg) <b class="req">*</b></span>
+        <input type="number" step="1" min="1" class="inp t-right" id="pfRate" value="${num(defRate)}"/></label>
+      <label class="fld mb0"><span id="pfKgLbl">Equivalent KG (auto)</span>
         <input type="number" step="0.1" class="inp" id="pfKg" placeholder="0.0"/></label>
     </div>
     <div class="row" style="gap:8px;margin-top:-6px">
@@ -4499,6 +4549,11 @@ function openPaymentForm(customerId, opts) {
       <button class="btn btn-ghost btn-xs" data-quick="half">Aadha (50%)</button>
       <button class="btn btn-ghost btn-xs" data-quick="kg">Baaki KG (${fmtKg(acc.kgBalance)})</button>
     </div>
+    <div class="tiny muted" id="pfRateHint" style="margin-top:6px"></div>
+    ${mix.length ? `<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:4px" id="pfRateChips">
+      <span class="tiny muted" style="align-self:center">Pending bill ka rate:</span>
+      ${mix.map(m => `<button class="btn btn-ghost btn-xs" data-prate="${num(m.rate)}">Rs. ${num(m.rate)} · ${fmtKg(m.kg)} baqi${m.count > 1 ? ' (' + m.count + ' bill)' : ''}</button>`).join('')}
+    </div>` : ''}
 
     <label class="fld mt10"><span>Note</span>
       <textarea class="inp" id="pfNote" placeholder="e.g. Half payment received — baqi agle bill mein">${o.note || ''}</textarea></label>
@@ -4519,28 +4574,46 @@ function openPaymentForm(customerId, opts) {
              <button class="btn btn-success" id="pfSave">💾 Save Payment</button>`
   });
 
-  const amtEl = $('#pfAmount', w), kgEl = $('#pfKg', w), rate = Biz.rate();
+  const amtEl = $('#pfAmount', w), kgEl = $('#pfKg', w), rateEl = $('#pfRate', w);
+  const payRate = () => num(rateEl && rateEl.value) || Biz.rate();
+  let lastEdit = 'amount';   // rate badalne par wahi field sync hoti hai jo user ne bhara tha
+
+  const rateHint = () => {
+    const el = $('#pfRateHint', w); if (!el) return;
+    const r = round2(payRate());
+    if (!dueList.length) { el.innerHTML = 'Is customer ka koi pending bill nahi — yeh payment <b>advance</b> banegi.'; return; }
+    const old = dueList[0];
+    const oldRate = round2(num(old.rate) || Biz.rate());
+    const same = dueList.filter(s => round2(num(s.rate) || Biz.rate()) === r).length;
+    el.innerHTML = (r === oldRate
+      ? '✓ Sahi rate — sab se purana pending bill <b>' + esc(old.invoiceNo) + '</b> (' + fmtDate(old.entryDate) + ') isi rate par hai.'
+      : '⚠️ Sab se purana pending bill <b>' + esc(old.invoiceNo) + '</b> (' + fmtDate(old.entryDate) + ') ka rate <b>' + fmtMoney(oldRate) + '/kg</b> hai — payment usi rate se convert honi chahiye.')
+      + (same ? ' · Is rate par <b>' + same + '</b> bill pending.' : '');
+  };
 
   function preview() {
     const amount = round2(num(amtEl.value));
     const due = Biz.dueSales(cid);
-    let left = amount;
+    let left = amount, kgTaken = 0;
     const rows = due.map(s => {
       const take = round2(Math.min(left, s._due));
       left = round2(left - take);
+      kgTaken = round1(kgTaken + round1(take / (num(s.rate) || payRate())));
       return `<tr>
         <td class="t-strong">${esc(s.invoiceNo)}</td><td class="tiny">${fmtDate(s.entryDate)}</td>
         <td class="t-right">${fmtMoney(s._amount)}</td>
         <td class="t-right t-bad">${fmtMoney(s._due)}<div class="tiny muted">${fmtKg(s._kgDue)}</div></td>
-        <td class="t-right ${take > 0 ? 't-ok' : 't-muted'}">${take > 0 ? fmtMoney(take) + '<div class="tiny">' + fmtKg(round1(take / (num(s.rate) || rate))) + '</div>' : '—'}</td>
-        <td class="t-right">${fmtMoney(round2(s._due - take))}<div class="tiny muted">${fmtKg(round1((s._due - take) / (num(s.rate) || rate)))}</div></td>
+        <td class="t-right ${take > 0 ? 't-ok' : 't-muted'}">${take > 0 ? fmtMoney(take) + '<div class="tiny">' + fmtKg(round1(take / (num(s.rate) || payRate()))) + '</div>' : '—'}</td>
+        <td class="t-right">${fmtMoney(round2(s._due - take))}<div class="tiny muted">${fmtKg(round1((s._due - take) / (num(s.rate) || payRate())))}</div></td>
       </tr>`;
     }).join('');
     $('#pfPreview', w).innerHTML = rows || emptyRow(6, 'Koi pending bill nahi — yeh advance ho jayega', '✅');
     const balAfter = round2(Math.max(0, acc.balance - amount));
     const advAfter = round2(Math.max(0, amount - acc.balance));
+    const kgAfter = round1(Math.max(0, acc.kgBalance - kgTaken));
     $('#pfPreviewNote', w).innerHTML = amount > 0
-      ? `Is payment ke baad: <b class="${balAfter > 0 ? 't-bad' : 't-ok'}">Balance ${fmtMoney(balAfter)} (${fmtKg(round1(balAfter / rate))})</b>` +
+      ? `Is payment se <b>${fmtKg(kgTaken)}</b> cover hogi (har bill apne rate par) · ` +
+      `Baqi: <b class="${balAfter > 0 ? 't-bad' : 't-ok'}">${fmtMoney(balAfter)} (${fmtKg(kgAfter)})</b>` +
       (advAfter > 0 ? ` · <b>Advance ${fmtMoney(advAfter)}</b> (next bill mein adjust hoga)` : '') +
       ` · Total paid ho jayega: <b>${fmtMoney(round2(acc.paid + amount))}</b>`
       : 'Amount ya KG likhein — allocation yahan show hoga.';
@@ -4551,32 +4624,48 @@ function openPaymentForm(customerId, opts) {
     $('#pmAmount', w).classList.toggle('on', m === 'amount');
     $('#pmKg', w).classList.toggle('on', m === 'kg');
     if (m === 'kg') {
-      amtEl.value = round2(num(kgEl.value) * rate) || '';
+      lastEdit = 'kg';
+      amtEl.value = round2(num(kgEl.value) * payRate()) || '';
       $('#pfKgLbl', w).innerHTML = 'Kitne KG ka payment? <b class="req">*</b>';
       $('#pfAmtLbl', w).textContent = 'Equivalent Amount (auto)';
     } else {
-      kgEl.value = round1(num(amtEl.value) / rate) || '';
+      lastEdit = 'amount';
+      kgEl.value = round1(num(amtEl.value) / payRate()) || '';
       $('#pfAmtLbl', w).innerHTML = 'Amount Received (Rs) <b class="req">*</b>';
       $('#pfKgLbl', w).textContent = 'Equivalent KG (auto)';
     }
     preview();
   }
   $$('[data-pm]', w).forEach(b => b.onclick = () => setMode(b.dataset.pm));
-  amtEl.oninput = () => { kgEl.value = round1(num(amtEl.value) / rate) || ''; preview(); };
-  kgEl.oninput = () => { amtEl.value = round2(num(kgEl.value) * rate) || ''; preview(); };
+  amtEl.oninput = () => { lastEdit = 'amount'; kgEl.value = round1(num(amtEl.value) / payRate()) || ''; preview(); };
+  kgEl.oninput = () => { lastEdit = 'kg'; amtEl.value = round2(num(kgEl.value) * payRate()) || ''; preview(); };
+  const applyRate = () => {
+    if (lastEdit === 'kg') amtEl.value = round2(num(kgEl.value) * payRate()) || '';
+    else kgEl.value = round1(num(amtEl.value) / payRate()) || '';
+    rateHint(); preview();
+  };
+  if (rateEl) rateEl.oninput = applyRate;
+  $$('[data-prate]', w).forEach(b => b.onclick = () => { if (rateEl) rateEl.value = num(b.dataset.prate); applyRate(); });
   $$('[data-quick]', w).forEach(b => b.onclick = () => {
     const q = b.dataset.quick;
-    if (q === 'balance') { amtEl.value = acc.balance; kgEl.value = round1(acc.balance / rate); }
-    if (q === 'half') { const v = round2(acc.balance / 2); amtEl.value = v; kgEl.value = round1(v / rate); }
-    if (q === 'kg') { kgEl.value = acc.kgBalance; amtEl.value = round2(acc.kgBalance * rate); }
+    // poora balance / baaki KG — exact values (mix rate ho to bhi theek, kyunki FIFO se aate hain)
+    if (q === 'balance') { amtEl.value = round2(acc.balance); kgEl.value = round1(acc.kgBalance); }
+    if (q === 'half') { amtEl.value = round2(acc.balance / 2); kgEl.value = round1(acc.kgBalance / 2); }
+    if (q === 'kg') { kgEl.value = round1(acc.kgBalance); amtEl.value = round2(acc.balance); }
     preview();
   });
+  rateHint();
 
   // if opened from a specific sale, pre-fill that sale's due
   if (o.saleId) {
     const s = DB.get('sales', o.saleId);
     const row = acc.saleRows.find(x => x.id === o.saleId);
-    if (row && row._due > 0) { amtEl.value = row._due; kgEl.value = round1(row._due / (num(s.rate) || rate)); }
+    if (row && row._due > 0) {
+      amtEl.value = row._due;
+      if (rateEl) rateEl.value = num(s.rate) || Biz.rate();
+      kgEl.value = round1(row._due / (num(s.rate) || payRate()));
+      rateHint();
+    }
   }
   preview();
 
@@ -4588,13 +4677,14 @@ function openPaymentForm(customerId, opts) {
       customerId: cid,
       amount: mode === 'kg' ? 0 : amount,
       kg: mode === 'kg' ? kg : null,
+      rate: payRate(),
       date: $('#pfDate', w).value || todayISO(),
       mode: $('#pfMode', w).value,
       ref: $('#pfRef', w).value,
       note: $('#pfNote', w).value
     });
     if (!res.ok) return toast(res.msg, 'error');
-    const shownKg = mode === 'kg' ? kg : round1(amount / rate);
+    const shownKg = mode === 'kg' ? kg : (res.totalKg || round1(amount / payRate()));
     toast('✔ ' + fmtMoney(res.totalAmount) + ' (' + fmtKg(shownKg) + ') receive ho gaya · Balance ' + fmtMoney(res.balance), 'success', 4200);
     closeModal(w);
     if (printAfter) printPaymentReceipt(res.records[0] ? res.records[0].id : null, res);
@@ -4612,6 +4702,7 @@ function printPaymentReceipt(paymentId, res) {
   const p = paymentId ? DB.get('payments', paymentId) : null;
   const cid = p ? p.customerId : (res && res.records[0] ? res.records[0].customerId : '');
   const acc = Biz.customerAccount(cid);
+  const payRateShown = num(p && p.rate) || num(res && res.records[0] && res.records[0].rate) || Biz.rate();
   const paper = printSizeFor('receipt');
   const body = `
     ${printSlipHeader(shop, 'PAYMENT RECEIPT')}
@@ -4623,7 +4714,7 @@ function printPaymentReceipt(paymentId, res) {
     </div>
     <table class="pr-tot">
       <tr><td>Amount Received</td><td class="r"><b>${fmtMoney(p ? p.amount : (res ? res.totalAmount : 0))}</b></td></tr>
-      <tr><td>Equivalent Wash KG @ ${fmtMoney(Biz.rate())}/kg</td><td class="r"><b>${fmtKg(p ? p.kgCovered : (res ? res.totalKg : 0))}</b></td></tr>
+      <tr><td>Equivalent Wash KG @ ${fmtMoney(payRateShown)}/kg</td><td class="r"><b>${fmtKg(res ? res.totalKg : (p ? p.kgCovered : 0))}</b></td></tr>
       <tr><td>Total Wash Received (all time)</td><td class="r">${fmtKg(acc.kgTotal)}</td></tr>
       <tr><td>Total Paid (all time)</td><td class="r">${fmtMoney(acc.paid)} = ${fmtKg(acc.kgPaid)}</td></tr>
       <tr class="grand"><td>BALANCE DUE (${fmtKg(acc.kgBalance)})</td><td class="r">${fmtMoney(acc.balance)}</td></tr>
@@ -6140,7 +6231,7 @@ function reportsPaint() {
     }))) : '<div class="empty"><div class="empty-ico">💵</div><div>Koi collection nahi</div></div>'}
           <div class="divider"></div>
           <div class="kv"><span>Total Collected</span><b class="t-ok">${fmtMoney(total)}</b></div>
-          <div class="kv"><span>Equivalent KG (rate ${fmtMoney(Biz.rate())})</span><b>${fmtKg(round1(total / Biz.rate()))}</b></div>
+          <div class="kv"><span>Equivalent KG (payments ke record se)</span><b>${fmtKg(round1(pays.reduce((a, p) => a + num(p.kgCovered), 0)))}</b></div>
           </div>
         </div>
       </div>`;
