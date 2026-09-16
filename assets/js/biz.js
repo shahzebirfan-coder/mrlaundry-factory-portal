@@ -93,10 +93,24 @@ const Biz = {
       paid: round2(pays.reduce((s, p) => s + num(p.amount), 0)),
       balance: round2(sales.reduce((s, x) => s + x._due, 0)),
       advance,
-      kgPaid: 0, kgBalance: 0
+      kgPaid: 0, kgBalance: 0, rateMix: [], avgRate: 0
     };
-    stats.kgPaid = rate ? round1(stats.paid / rate) : 0;
-    stats.kgBalance = rate ? round1(stats.balance / rate) : 0;
+    /* KG accounting RATE-AWARE: har bill apne rate par convert hota hai.
+       Purane bill Rs.200/kg par, naye Rs.320/kg par — mix ho to bhi theek. */
+    stats.kgPaid = round1(sales.reduce((a, x) => a + num(x._kgApplied), 0));
+    stats.kgBalance = round1(sales.reduce((a, x) => a + num(x._kgDue), 0));
+    const mixMap = {};
+    sales.forEach(x => {
+      if (num(x._due) <= 0.009) return;
+      const r = round2(this.saleRate(x));
+      const k = String(r);
+      if (!mixMap[k]) mixMap[k] = { rate: r, kg: 0, amount: 0, count: 0, invoiceNo: x.invoiceNo, date: x.entryDate };
+      mixMap[k].kg = round1(mixMap[k].kg + num(x._kgDue));
+      mixMap[k].amount = round2(mixMap[k].amount + num(x._due));
+      mixMap[k].count++;
+    });
+    stats.rateMix = Object.keys(mixMap).map(k => mixMap[k]).sort((a, b) => b.rate - a.rate);
+    stats.avgRate = stats.kgTotal ? round2(stats.amount / stats.kgTotal) : rate;
     stats.outstandingInvoices = sales.filter(x => x._due > 0.009).length;
 
     // ---- per-sale view for display (uses cached computed fields) ----
@@ -126,7 +140,8 @@ const Biz = {
       } else {
         const p = e.p;
         const amt = num(p.amount), r = num(p.rate) || rate;
-        const kgCut = amtBal > 0 ? round1(Math.min(kgBal, amt / r)) : 0;
+        /* KG cut: payment record par jo KG cover hui (FIFO, rate-aware) — purana rate ho to wahi */
+        const kgCut = amtBal > 0 ? round1(Math.min(kgBal, num(p.kgCovered) || (amt / r))) : 0;
         kgBal = round1(Math.max(0, kgBal - kgCut));
         amtBal = round2(amtBal - amt);
         rows.push({
@@ -229,7 +244,8 @@ const Biz = {
     return {
       ok: true, records, appliedTo,
       advance: acc.advance, balance: acc.balance,
-      totalAmount: amount, totalKg: kg != null ? kg : round1(amount / rate)
+      totalAmount: amount,
+      totalKg: kg != null ? kg : round1(appliedTo.reduce((a, x) => a + num(x.kg), 0) + (Math.max(0, left) / rate))
     };
   },
 
