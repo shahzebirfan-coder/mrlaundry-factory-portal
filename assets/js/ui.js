@@ -15,7 +15,7 @@ const NAV = [
   { id: 'ledger', label: 'Payment Ledger', icon: '📒', sub: 'Payment, kg balance, statement' },
 
   { sec: 'Business' },
-  { id: 'products', label: 'Products', icon: '🧺', sub: 'Wash items, category, rate' },
+  { id: 'products', label: 'Products', icon: '🧺', sub: 'Wash items & rate' },
   { id: 'expenses', label: 'Expenses', icon: '💸', sub: 'Factory kharchay' },
   { id: 'purchases', label: 'Purchases', icon: '🛒', sub: 'Vendors se khareedari' },
   { id: 'vendorlist', label: 'Vendors', icon: '🏬', sub: 'Vendor requirements & payable' },
@@ -31,12 +31,12 @@ const NAV = [
 
 const PAGE_TITLES = {
   dashboard: ['Dashboard', 'Aapke factory ka poora business — aik nazar mein'],
-  newsales: ['New Sales — Wash Entry', 'Daily clients se aane wale kapre, category-wise KG ke saath record karein'],
+  newsales: ['New Sales — Wash Entry', 'Daily clients se aane wale kapre — items aur KG ke saath record karein'],
   sales: ['Order Invoices / Sales', 'Har entry ka status, delivery date aur billing'],
   delivery: ['Delivery Queue', 'Factory mein maujood kapre — age ke sath'],
   customers: ['Customers', 'Clients / vendor accounts'],
   ledger: ['Payment Ledger', 'Payment, kg ka hisaab aur running statement'],
-  products: ['Products', 'Wash items — category wise'],
+  products: ['Products', 'Wash items list'],
   expenses: ['Expenses', 'Factory ke rozmarra kharchay'],
   purchases: ['Purchases from Vendors', 'Bahir se kharida gaya maal'],
   vendorlist: ['Vendors', 'Vendors aur unki requirements'],
@@ -45,7 +45,7 @@ const PAGE_TITLES = {
   branches: ['Branches', 'Factory aur shop branches'],
   reports: ['Reports', 'Business analysis aur exports'],
   users: ['Users', 'Staff logins aur permissions'],
-  settings: ['Settings', 'Shop profile, rate, categories, cloud & backup']
+  settings: ['Settings', 'Shop profile, rate, printers, cloud & backup']
 };
 
 const UI = {
@@ -116,6 +116,7 @@ const UI = {
                 <input class="inp inp-sm gs" id="globalSearch" placeholder="🔍 Search customer / invoice…" autocomplete="off"/>
                 <div class="gs-drop" id="gsDrop"></div>
               </div>
+              <button class="icon-btn" id="cloudChip" title="Cloud sync" style="width:auto;padding:0 10px;font-size:12px;font-weight:800">☁️ ${Cloud.statusShort()}</button>
               <button class="icon-btn" id="themeBtn" title="Theme">${this.theme() === 'dark' ? '☀️' : '🌙'}</button>
               <button class="btn btn-primary btn-sm" id="quickNew">➕ New Sale</button>
               <button class="icon-btn" id="moreBtn" title="More">⋯</button>
@@ -145,6 +146,15 @@ const UI = {
       if (yes) { DB.logout(); app.go('login'); }
     };
     const tb = $('#themeBtn'); if (tb) tb.onclick = () => this.toggleTheme();
+    const cc = $('#cloudChip');
+    if (cc) {
+      cc.onclick = async () => {
+        if (!Cloud.ready) { app.go('settings'); setTimeout(() => { const b = document.querySelector('[data-st="cloud"]'); if (b) b.click(); }, 250); return; }
+        await Cloud.syncNow();
+        this.bindLayout(page);
+      };
+      Cloud.updateDot();
+    }
     const qn = $('#quickNew'); if (qn) {
       if (!DB.can('newsales')) qn.style.display = 'none';
       else qn.onclick = () => app.go('newsales');

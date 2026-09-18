@@ -55,12 +55,14 @@ const app = {
 window.addEventListener('DOMContentLoaded', () => {
   document.documentElement.dataset.theme = UI.theme();
   DB.load();
-  Cloud.init();
+  const boot = Cloud.init();              // config + pehla sync (background)
   const hash = (location.hash || '').replace('#', '');
   const start = (hash && hash !== 'login') ? hash : null;
   const u = DB.currentUser();
   if (u) app.go(start && DB.can(start) ? start : 'dashboard');
   else renderLogin();
+  /* naye system par: cloud se data aane ke baad screen khud refresh */
+  if (boot && boot.then) boot.then(() => { if (DB.currentUser()) app.go(app.current || 'dashboard'); else renderLogin(); }).catch(() => {});
 });
 
 window.addEventListener('hashchange', () => {

@@ -77,7 +77,9 @@ const DB = {
         { id: 'p_machinewash', name: 'Machine Wash + Dry', category: 'A', inputType: 'kg', unitPrice: 200, active: true, createdAt: now },
         { id: 'p_irononly', name: 'Iron / Press Only', category: 'B', inputType: 'kg', unitPrice: 200, active: true, createdAt: now },
         { id: 'p_dryclean', name: 'Dry Clean', category: 'B', inputType: 'kg', unitPrice: 200, active: true, createdAt: now },
-        { id: 'p_stain', name: 'Stain Removal / Special Treatment', category: 'C', inputType: 'kg', unitPrice: 200, active: true, createdAt: now }
+        { id: 'p_stain', name: 'Stain Removal / Special Treatment', category: 'C', inputType: 'kg', unitPrice: 200, active: true, createdAt: now },
+        { id: 'p_shoes', name: 'SHOES', category: 'A', inputType: 'kg', unitPrice: 320, active: true, createdAt: now,
+          types: ['Junior Shoes', 'Sports Shoes', 'Man Shoes', 'CH Shoes'] }
       ],
       sales: [], payments: [], expenses: [], purchases: [], vendors: [], vendorRequests: [],
       employees: [], salaries: [], drawings: [], deliveries: [], auditLog: [],
@@ -118,6 +120,13 @@ const DB = {
       'deliveries', 'auditLog'];
     tables.forEach(t => { if (!Array.isArray(d[t])) d[t] = seed[t]; });
     d.settings = Object.assign({}, seed.settings, d.settings || {});
+    /* ⚠️ Cloud config (URL / Shop ID / ON-OFF) DEVICE-LEVEL hai — synced
+       data se kabhi overwrite na ho (yehi "firebase remove ho gaya" ka fix hai) */
+    if (typeof Cloud !== 'undefined' && Cloud.cfg && Cloud.cfg.url) {
+      d.settings.cloudEnabled = !!Cloud.cfg.enabled;
+      d.settings.firebaseConfig = Cloud.cfg.url;
+      d.settings.shopId = Cloud.cfg.shopId;
+    }
     // Sirf khali/undefined fields ko default se bharein — user ki edited
     // values (shop name, phone, address) kabhi overwrite na hon.
     Object.keys(SHOP_DEFAULTS).forEach(k => {
@@ -177,6 +186,15 @@ const DB = {
     return true;
   },
   settings() { return this._data.settings; },
+  /** cloud config ka mirror (sirf is device par; cloud par push NAHI hota) */
+  setCloudMirror(c) {
+    if (!this._data) return;
+    const s = this._data.settings = this._data.settings || {};
+    s.cloudEnabled = !!(c && c.enabled);
+    s.firebaseConfig = (c && c.url) || '';
+    s.shopId = (c && c.shopId) || '';
+    try { SafeStore.set(DB_KEY, JSON.stringify(this._data)); } catch (e) {}
+  },
   saveSettings(patch) {
     this._data.settings = Object.assign({}, this._data.settings, patch || {});
     this.save();

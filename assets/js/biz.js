@@ -155,11 +155,33 @@ const Biz = {
     return stats;
   },
 
+  /** line ka poora naam: "SHOES — Junior Shoes" (type ho to) */
+  lineName(l) {
+    const p = l && l.productId ? this.product(l.productId) : null;
+    const n = (p ? p.name : (l && l.productName)) || 'Item';
+    return (l && l.type) ? n + ' — ' + l.type : n;
+  },
+  /** ek item ke types (product par saved) */
+  productTypes(productId) {
+    const p = this.product(productId);
+    return (p && Array.isArray(p.types)) ? p.types.filter(Boolean) : [];
+  },
+  /** naya type naam item par SAVE karein (agli dafa khud nazar aayega). true = naya tha */
+  saveProductType(productId, name) {
+    name = String(name || '').trim();
+    if (!productId || !name) return false;
+    const p = this.product(productId);
+    if (!p) return false;
+    const list = Array.isArray(p.types) ? p.types.slice() : [];
+    if (list.indexOf(name) >= 0) return false;
+    list.push(name);
+    DB.upsert('products', Object.assign({}, p, { types: list }), { silent: true });
+    DB.save();
+    return true;
+  },
+
   saleLinesText(s) {
-    return (s.lines || []).map(l => {
-      const p = this.product(l.productId);
-      return (p ? p.name : (l.productName || 'Item')) + ' [' + (l.category || '-') + '] ' + fmtKg(l.qtyKg) + (num(l.pcs) ? ' / ' + num(l.pcs) + ' pcs' : '');
-    }).join(' • ');
+    return (s.lines || []).map(l => this.lineName(l) + ' ' + fmtKg(l.qtyKg)).join(' • ');
   },
   saleLinesShort(s) {
     const byCat = {};
@@ -169,8 +191,7 @@ const Biz = {
   saleItemsSummary(s) {
     const names = [];
     (s.lines || []).forEach(l => {
-      const p = this.product(l.productId);
-      const n = (p ? p.name : l.productName) || 'Item';
+      const n = this.lineName(l);
       if (names.indexOf(n) < 0) names.push(n);
     });
     return names.join(', ') || '—';
@@ -395,7 +416,7 @@ const Biz = {
           const cat = cats[Math.floor(Math.random() * 3)];
           const pool = prods.filter(p => p.category === cat);
           const p = pool[Math.floor(Math.random() * pool.length)] || prods[0];
-          lines.push({ id: uid('ln'), productId: p.id, category: cat, qtyKg: round1(2 + Math.random() * 25), pcs: Math.floor(Math.random() * 40), note: '' });
+          lines.push({ id: uid('ln'), productId: p.id, category: cat, qtyKg: round1(2 + Math.random() * 25), pcs: 0, note: '' });
         }
         inv++;
         const kg = round1(lines.reduce((a, l) => a + num(l.qtyKg), 0));
@@ -405,7 +426,7 @@ const Biz = {
           id: uid('sal'), invoiceNo: 'INV-' + String(inv).padStart(4, '0'), branchId: (DB.all('branches')[0] || {}).id,
           customerId: cid, entryDate: date, deliveryDate: delivered ? addDays(date, 1 + Math.floor(Math.random() * 3)) : '',
           status: delivered ? 'delivered' : 'open', lines, kgTotal: kg,
-          piecesTotal: lines.reduce((a, l) => a + num(l.pcs), 0), rate, amount: round2(kg * rate),
+          piecesTotal: 0, rate, amount: round2(kg * rate),
           paymentMode: Math.random() > 0.5 ? 'Cash' : 'Credit', amountPaidAtEntry: 0, note: '',
           createdBy: 'Demo', createdAt: new Date().toISOString()
         }, { silent: true });

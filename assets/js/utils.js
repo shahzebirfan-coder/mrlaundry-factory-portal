@@ -510,12 +510,11 @@ function printTestSlip() {
   const paper = p.paper || 'thermal80';
   const rate = num(shop.ratePerKg) || 320;
   const rows = [
-    { i: 1, name: 'BEDSHEET WASH', cat: 'A', kg: 12.5, pcs: 4 },
-    { i: 2, name: 'SHOES / SNEAKERS', cat: 'A', kg: 6, pcs: 3 },
-    { i: 3, name: 'TOWEL DRY CLEAN', cat: 'B', kg: 4.5, pcs: 6 }
+    { i: 1, name: 'BEDSHEET WASH', kg: 12.5 },
+    { i: 2, name: 'SHOES / SNEAKERS', kg: 6 },
+    { i: 3, name: 'TOWEL DRY CLEAN', kg: 4.5 }
   ];
   const totalKg = round1(rows.reduce((a, r) => a + r.kg, 0));
-  const totalPcs = rows.reduce((a, r) => a + r.pcs, 0);
   const body = `
     ${printSlipHeader(shop, 'TEST PRINT')}
     <div class="pr-title">SALE SLIP (TEST)</div>
@@ -527,16 +526,12 @@ function printTestSlip() {
       <div class="tk"><span>Delivery Date:</span><b class="tk-b">____________</b></div>
     </div>
     <table class="pr-tbl">
-      <thead><tr><th style="width:9%">#</th><th>ITEM</th><th class="c" style="width:18%">CAT</th><th class="r" style="width:18%">KG</th><th class="r" style="width:16%">PCS</th></tr></thead>
-      <tbody>${rows.map(r => `<tr><td>${r.i}</td><td>${r.name}</td><td class="c">${r.cat}</td>
-        <td class="r">${fmtNum(r.kg, 1)}</td><td class="r">${r.pcs}</td></tr>`).join('')}</tbody>
+      <thead><tr><th style="width:12%">#</th><th>ITEM</th><th class="r" style="width:28%">KG</th></tr></thead>
+      <tbody>${rows.map(r => `<tr><td>${r.i}</td><td>${r.name}</td>
+        <td class="r">${fmtNum(r.kg, 1)}</td></tr>`).join('')}</tbody>
     </table>
     <table class="pr-tot">
       <tr class="grand"><td>TOTAL RECEIVED</td><td class="r">${fmtKg(totalKg)}</td></tr>
-      <tr><td>Total Pieces</td><td class="r"><b>${fmtNum(totalPcs)}</b></td></tr>
-      <tr><td>&nbsp;&nbsp;— A Category</td><td class="r">18.5 kg</td></tr>
-      <tr><td>&nbsp;&nbsp;— B Category</td><td class="r">4.5 kg</td></tr>
-      <tr><td>Delivery Pending</td><td class="r"><b>23 kg</b></td></tr>
     </table>
     <div class="pr-foot">
       <div class="small">Yeh TEST print hai (printer setting check). Rate: ${fmtMoney(rate)}/kg</div>
