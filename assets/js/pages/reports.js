@@ -16,7 +16,7 @@ function reportsPaint() {
   const m = Biz.metrics(Period);
   const tabs = [
     ['pl', '🧮 Profit &amp; Loss'],
-    ['kg', '⚖️ KG / Category'],
+    ['kg', '⚖️ KG / Item'],
     ['cust', '👥 Customer-wise'],
     ['exp', '💸 Expenses'],
     ['del', '🚚 Delivery & Pending'],
@@ -102,10 +102,9 @@ function reportsPaint() {
     const sales = Biz.salesIn(Period);
     const byProduct = {};
     sales.forEach(s => (s.lines || []).forEach(l => {
-      const key = ((Biz.product(l.productId) || {}).name || l.productName || 'Item') + ' [' + (l.category || '-') + ']';
-      byProduct[key] = byProduct[key] || { kg: 0, pcs: 0, amount: 0, count: 0 };
+      const key = Biz.lineName(l);   // "SHOES — Junior Shoes" (type ho to)
+      byProduct[key] = byProduct[key] || { kg: 0, amount: 0, count: 0 };
       byProduct[key].kg = round1(byProduct[key].kg + num(l.qtyKg));
-      byProduct[key].pcs += num(l.pcs);
       byProduct[key].amount = round2(byProduct[key].amount + num(l.qtyKg) * Biz.saleRate(s));
       byProduct[key].count++;
     }));
@@ -117,22 +116,18 @@ function reportsPaint() {
             <button class="btn btn-ghost btn-sm" id="kgCsv">⬇️ CSV</button></div>
           <div class="tbl-wrap">
             <table class="tbl" style="min-width:640px">
-              <thead><tr><th>Item</th><th class="t-right">KG</th><th class="t-right">Pieces</th><th class="t-center">Times</th><th class="t-right">Amount</th></tr></thead>
+              <thead><tr><th>Item</th><th class="t-right">KG</th><th class="t-center">Times</th><th class="t-right">Amount</th></tr></thead>
               <tbody>${keys.length ? keys.map(k => `<tr><td class="t-strong">${esc(k)}</td><td class="t-right">${fmtKg(byProduct[k].kg)}</td>
-                <td class="t-right">${fmtNum(byProduct[k].pcs)}</td><td class="t-center">${fmtNum(byProduct[k].count)}</td>
-                <td class="t-right">${fmtMoney(byProduct[k].amount)}</td></tr>`).join('') : emptyRow(5, 'Koi data nahi', '📭')}</tbody>
-              <tfoot><tr><td>TOTAL</td><td class="t-right">${fmtKg(m.receivedKg)}</td><td class="t-right">${fmtNum(m.receivedPcs)}</td>
+                <td class="t-center">${fmtNum(byProduct[k].count)}</td>
+                <td class="t-right">${fmtMoney(byProduct[k].amount)}</td></tr>`).join('') : emptyRow(4, 'Koi data nahi', '📭')}</tbody>
+              <tfoot><tr><td>TOTAL</td><td class="t-right">${fmtKg(m.receivedKg)}</td>
                 <td></td><td class="t-right">${fmtMoney(m.income)}</td></tr></tfoot>
             </table>
           </div>
         </div>
-        <div class="card">
-          <div class="card-head"><h3>🏷️ Category Split</h3></div>
-          <div class="card-body">${UI.catDonut(m.catKg)}</div>
-        </div>
       </div>`;
     $('#kgCsv').onclick = () => exportCSV('kg-report-' + Period.shortLabel().replace(/\s/g, '') + '.csv',
-      ['Item', 'KG', 'Pieces', 'Times', 'Amount'], keys.map(k => [k, byProduct[k].kg, byProduct[k].pcs, byProduct[k].count, byProduct[k].amount]));
+      ['Item', 'KG', 'Times', 'Amount'], keys.map(k => [k, byProduct[k].kg, byProduct[k].count, byProduct[k].amount]));
   }
 
   if (RepUI.tab === 'cust') {

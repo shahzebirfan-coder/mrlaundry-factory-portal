@@ -23,7 +23,7 @@ function dashPaint() {
     <div class="stats">
       ${UI.statCard({
     icon: '⚖️', label: 'Total Received — ' + Period.shortLabel(), value: fmtKg(m.receivedKg),
-    foot: m.newEntries + ' entries · ' + fmtNum(m.receivedPcs) + ' pcs', tone: 'info',
+    foot: m.newEntries + ' entries', tone: 'info',
     clickable: true, attrs: 'data-goto="sales"'
   })}
       ${UI.statCard({
@@ -33,7 +33,7 @@ function dashPaint() {
   })}
       ${UI.statCard({
     icon: '🏭', label: 'Clothes in Factory Now', value: fmtKg(m.inFactoryKg),
-    foot: m.inFactoryCount + ' open orders · ' + fmtNum(m.inFactoryPcs) + ' pcs', tone: m.inFactoryKg > 0 ? 'warn' : 'good',
+    foot: m.inFactoryCount + ' open orders', tone: m.inFactoryKg > 0 ? 'warn' : 'good',
     clickable: true, attrs: 'data-goto="delivery"'
   })}
       ${UI.statCard({
@@ -96,13 +96,6 @@ function dashPaint() {
         <div class="kv"><span>Total billed (all time)</span><b>${fmtMoney(Biz.sales().reduce((a, s) => a + Biz.saleAmount(s), 0))}</b></div>
         <div class="kv"><span>Total collected (all time)</span><b>${fmtMoney(Biz.payments().reduce((a, p) => a + num(p.amount), 0))}</b></div>
       </div>
-    </div>`;
-
-  /* -------- category split + chart -------- */
-  const catCard = `
-    <div class="card">
-      <div class="card-head"><h3>🏷️ Category-wise KG — ${esc(Period.shortLabel())}</h3></div>
-      <div class="card-body">${UI.catDonut(m.catKg)}</div>
     </div>`;
 
   const chartCard = `
@@ -191,7 +184,7 @@ function dashPaint() {
     ${cards}
     <div class="grid g-2-1">
       <div>${plCard}${chartCard}${pendCard}</div>
-      <div>${quick}${recvCard}${catCard}${topCard}</div>
+      <div>${quick}${recvCard}${topCard}</div>
     </div>`;
 
   const dr = $('#dashRate', el); if (dr) dr.onclick = () => openRateForm();
@@ -248,8 +241,8 @@ function printMonthReport() {
     </div>
     <table class="pr-tbl">
       <tr><th colspan="2">SUMMARY</th></tr>
-      <tr><td>Total Received</td><td class="r"><b>${fmtKg(m.receivedKg)}</b> (${fmtNum(m.receivedPcs)} pcs)</td></tr>
-      <tr><td>Total Delivered</td><td class="r"><b>${fmtKg(m.deliveredKg)}</b> (${fmtNum(m.deliveredPcs)} pcs)</td></tr>
+      <tr><td>Total Received</td><td class="r"><b>${fmtKg(m.receivedKg)}</b></td></tr>
+      <tr><td>Total Delivered</td><td class="r"><b>${fmtKg(m.deliveredKg)}</b></td></tr>
       <tr><td>Clothes in Factory (now)</td><td class="r"><b>${fmtKg(m.inFactoryKg)}</b></td></tr>
       <tr><td>Total Income (billed)</td><td class="r"><b>${fmtMoney(m.income)}</b></td></tr>
       <tr><td>Cash Collected</td><td class="r"><b>${fmtMoney(m.collected)}</b></td></tr>
@@ -258,12 +251,6 @@ function printMonthReport() {
       <tr><td>Salaries</td><td class="r"><b>${fmtMoney(m.salaries)}</b></td></tr>
       <tr><td>Owner Drawings</td><td class="r"><b>${fmtMoney(m.drawings)}</b></td></tr>
       <tr><td><b>Net Profit / Loss</b></td><td class="r"><b>${fmtMoney(m.profit)}</b></td></tr>
-    </table>
-    <div style="margin-top:10px"></div>
-    <table class="pr-tbl">
-      <tr><th>Category</th><th class="r">KG Received</th><th class="r">Share</th></tr>
-      ${Biz.catKeys().map(k => `<tr><td>${esc(Biz.catLabel(k))}</td><td class="r">${fmtKg(m.catKg[k] || 0)}</td>
-        <td class="r">${m.receivedKg ? Math.round((m.catKg[k] || 0) / m.receivedKg * 100) : 0}%</td></tr>`).join('')}
     </table>
     <div style="margin-top:10px"></div>
     <table class="pr-tbl">

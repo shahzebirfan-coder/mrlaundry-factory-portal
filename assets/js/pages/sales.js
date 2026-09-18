@@ -80,7 +80,7 @@ function salesPaint() {
         <table class="tbl" style="min-width:1080px">
           <thead><tr>
             <th>Invoice</th><th>Customer</th><th>Invoice Date</th><th>Delivery Date</th>
-            <th>Items</th><th class="t-right">KG (A/B/C)</th><th class="t-center">Status</th>
+            <th>Items</th><th class="t-right">KG</th><th class="t-center">Status</th>
             <th class="t-right">Amount</th><th class="t-right">Due</th><th class="t-center">Actions</th>
           </tr></thead>
           <tbody>
@@ -92,8 +92,7 @@ function salesPaint() {
               <td class="t-nowrap">${fmtDate(s.entryDate)}</td>
               <td class="t-nowrap">${s.deliveryDate ? '<span class="t-ok">' + fmtDate(s.deliveryDate) + '</span>' : '<span class="t-warn tiny">pending</span>'}</td>
               <td class="tiny">${esc(Biz.saleItemsSummary(s))}</td>
-              <td class="t-right t-nowrap"><b>${fmtKg(s.kgTotal)}</b><div class="tiny muted">
-                ${Biz.catKeys().map(k => esc(k) + ' ' + fmtNum(Biz.saleCatKg(s, k), 1)).join(' / ')}</div></td>
+              <td class="t-right t-nowrap"><b>${fmtKg(s.kgTotal)}</b></td>
               <td class="t-center">${UI.statusPill(s.status)}</td>
               <td class="t-right t-nowrap">${fmtMoney(Biz.saleAmount(s))}</td>
               <td class="t-right t-nowrap">${due > 0.009 ? '<b class="t-bad">' + fmtMoney(due) + '</b>' : '<span class="t-ok tiny">paid</span>'}</td>
@@ -127,10 +126,9 @@ function salesPaint() {
   const so = $('#sSort'); if (so) so.onchange = e => { SalesUI.sort = e.target.value; salesPaint(); };
   $('#sNew').onclick = () => app.go('newsales');
   $('#sExport').onclick = () => exportCSV('sales-' + Period.shortLabel().replace(/\s/g, '') + '.csv',
-    ['Invoice', 'Customer', 'Invoice Date', 'Delivery Date', 'Items', 'KG', 'A', 'B', 'C', 'Pieces', 'Rate', 'Amount', 'Status'],
+    ['Invoice', 'Customer', 'Invoice Date', 'Delivery Date', 'Items', 'KG', 'Rate', 'Amount', 'Status'],
     rows.map(s => [s.invoiceNo, Biz.customerName(s.customerId), s.entryDate, s.deliveryDate || '',
-    Biz.saleItemsSummary(s), s.kgTotal, Biz.saleCatKg(s, 'A'), Biz.saleCatKg(s, 'B'), Biz.saleCatKg(s, 'C'),
-    s.piecesTotal, Biz.saleRate(s), Biz.saleAmount(s), s.status]));
+    Biz.saleItemsSummary(s), s.kgTotal, Biz.saleRate(s), Biz.saleAmount(s), s.status]));
 
   $$('[data-pg]', el).forEach(b => b.onclick = () => { SalesUI.page = +b.dataset.pg; salesPaint(); });
   $$('[data-view]', el).forEach(b => b.onclick = e => { e.stopPropagation(); openSaleDetail(b.dataset.view); });
@@ -182,8 +180,6 @@ function openSaleDetail(id, opts) {
 
       <div class="card card-flat"><div class="card-body">
         <div class="kv"><span>Total KG</span><b>${fmtKg(s.kgTotal)}</b></div>
-        ${Biz.catKeys().map(k => `<div class="kv"><span>${esc(Biz.catLabel(k))}</span><b>${fmtKg(Biz.saleCatKg(s, k))}</b></div>`).join('')}
-        <div class="kv"><span>Pieces</span><b>${fmtNum(s.piecesTotal)}</b></div>
         <div class="kv"><span>Rate</span><b>${fmtMoney(Biz.saleRate(s))} / kg</b></div>
         <div class="kv total"><span>Invoice Amount</span><b>${fmtMoney(me._amount)}</b></div>
         <div class="kv"><span>Received against this bill</span><b class="t-ok">${fmtMoney(me._applied)}</b></div>
@@ -194,11 +190,10 @@ function openSaleDetail(id, opts) {
 
     <div class="card card-flat mt14"><div class="card-head"><h3>🧺 Items</h3></div>
       <div class="tbl-wrap"><table class="tbl" style="min-width:520px">
-        <thead><tr><th>#</th><th>Item</th><th>Category</th><th class="t-right">KG</th><th class="t-center">Pieces</th><th class="t-right">Amount</th></tr></thead>
+        <thead><tr><th>#</th><th>Item</th><th class="t-right">KG</th><th class="t-right">Amount</th></tr></thead>
         <tbody>${(s.lines || []).map((l, i) => `<tr>
-          <td>${i + 1}</td><td class="t-strong">${esc((Biz.product(l.productId) || {}).name || l.productName || 'Item')}</td>
-          <td><span class="tag" style="background:${Biz.catColor(l.category)}22;color:${Biz.catColor(l.category)}">${esc(l.category)}</span></td>
-          <td class="t-right">${fmtKg(l.qtyKg)}</td><td class="t-center">${fmtNum(l.pcs)}</td>
+          <td>${i + 1}</td><td class="t-strong">${esc(Biz.lineName(l))}</td>
+          <td class="t-right">${fmtKg(l.qtyKg)}</td>
           <td class="t-right">${fmtMoney(round2(num(l.qtyKg) * Biz.saleRate(s)))}</td></tr>`).join('')}</tbody>
       </table></div></div>
 
@@ -274,9 +269,10 @@ function editSaleForm(id) {
     <div class="card card-flat"><div class="card-head"><h3>Items / KG</h3><div class="sp"></div>
       <button class="btn btn-ghost btn-sm" id="edAddLine">➕ Add row</button></div>
       <div class="tbl-wrap"><table class="tbl" style="min-width:560px">
-        <thead><tr><th>Item</th><th>Category</th><th class="t-right">KG</th><th class="t-center">Pcs</th><th></th></tr></thead>
+        <thead><tr><th>Item</th><th>Type</th><th class="t-right">KG</th><th></th></tr></thead>
         <tbody id="edLines"></tbody></table></div></div>
-    <label class="fld mt10"><span>Note</span><textarea class="inp" id="edNote">${esc(s.note || '')}</textarea></label>`;
+    <label class="fld mt10"><span>Note</span><textarea class="inp" id="edNote">${esc(s.note || '')}</textarea></label>
+    <datalist id="edTypeList"></datalist>`;
 
   const w = openModal({
     title: '✏️ Edit ' + s.invoiceNo, size: 'lg', body,
@@ -290,30 +286,34 @@ function editSaleForm(id) {
       <td><select class="inp inp-xs edProd">
         ${prods.map(p => `<option value="${p.id}" ${p.id === l.productId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
         <option value="" ${!l.productId ? 'selected' : ''}>— other —</option></select></td>
-      <td><select class="inp inp-xs edCat">${cats.map(c => `<option ${c.key === l.category ? 'selected' : ''}>${c.key}</option>`).join('')}</select></td>
+      <td><input class="inp inp-xs edType" style="width:130px" list="edTypeList" value="${esc(l.type || '')}" placeholder="type (optional)" title="Jaise Junior Shoes"/></td>
       <td class="t-right"><input type="number" step="0.1" class="inp inp-xs edKg t-right" style="width:80px" value="${l.qtyKg}"/></td>
-      <td class="t-center"><input type="number" step="1" class="inp inp-xs edPcs t-center" style="width:64px" value="${num(l.pcs) || ''}"/></td>
       <td><button class="icon-btn" style="width:28px;height:28px;font-size:11px" data-rml>✕</button></td>`;
     tr.querySelector('[data-rml]').onclick = () => tr.remove();
-    tr.querySelector('.edProd').onchange = e => {
-      const p = Biz.product(e.target.value);
-      if (p) { tr.querySelector('.edCat').value = p.category; }
-    };
     return tr;
   }
   const tbody = $('#edLines', w);
   (s.lines || []).forEach(l => tbody.appendChild(lineRow(l)));
-  $('#edAddLine', w).onclick = () => tbody.appendChild(lineRow({ productId: prods[0] ? prods[0].id : '', category: 'A', qtyKg: 0, pcs: 0 }));
+  /* item ke pehle se saved types (Step 03) suggest karne ke liye */
+  const dlEd = $('#edTypeList', w);
+  if (dlEd) {
+    const seen = [];
+    prods.forEach(p => (p.types || []).forEach(t => { if (t && seen.indexOf(t) < 0) seen.push(t); }));
+    (s.lines || []).forEach(l => { if (l.type && seen.indexOf(l.type) < 0) seen.push(l.type); });
+    dlEd.innerHTML = seen.map(t => '<option value="' + esc(t) + '"></option>').join('');
+  }
+  $('#edAddLine', w).onclick = () => tbody.appendChild(lineRow({ productId: prods[0] ? prods[0].id : '', category: '', type: '', qtyKg: 0, pcs: 0 }));
 
   $('#edSave', w).onclick = () => {
     const lines = $$('tr', tbody).map(tr => {
       const pid = tr.querySelector('.edProd').value;
-      const cat = tr.querySelector('.edCat').value;
       const kg = round1(tr.querySelector('.edKg').value);
-      const pcs = num(tr.querySelector('.edPcs').value);
-      return { id: uid('ln'), productId: pid || null, productName: (Biz.product(pid) || {}).name || 'Item', category: cat, qtyKg: kg, pcs, note: '' };
-    }).filter(l => l.qtyKg > 0 || l.pcs > 0);
+      const tyEl = tr.querySelector('.edType');
+      return { id: uid('ln'), productId: pid || null, productName: (Biz.product(pid) || {}).name || 'Item', category: (Biz.product(pid) || {}).category || '', type: (tyEl ? tyEl.value.trim() : ''), qtyKg: kg, pcs: 0, note: '' };
+    }).filter(l => l.qtyKg > 0);
     if (!lines.length) return toast('Kam az kam ek item rakhein', 'error');
+    /* Step 03: edit mein likhe naye type naam item par yaad rakhein */
+    lines.forEach(l => { if (l.type && l.productId) Biz.saveProductType(l.productId, l.type); });
     const rate = num($('#edRate', w).value) || Biz.rate();
     const kgTotal = round1(lines.reduce((a, l) => a + l.qtyKg, 0));
     const deliveryDate = $('#edDelivery', w).value || '';
@@ -325,8 +325,8 @@ function editSaleForm(id) {
       deliveryDate,
       status: deliveryDate ? 'delivered' : 'open',
       deliveredKg: deliveryDate ? kgTotal : 0,
-      deliveredPcs: deliveryDate ? lines.reduce((a, l) => a + l.pcs, 0) : 0,
-      lines, kgTotal, piecesTotal: lines.reduce((a, l) => a + l.pcs, 0),
+      deliveredPcs: 0,
+      lines, kgTotal, piecesTotal: 0,
       rate, amount: round2(kgTotal * rate), amountManual: null, note: $('#edNote', w).value || ''
     }));
     DB.audit('sale-edit', 'Invoice ' + s.invoiceNo + ' edit hui');
@@ -355,8 +355,7 @@ function openDeliveryForm(saleId) {
         <input type="number" step="0.1" class="inp" id="dvKg" value="${pendKg}"/>
         <div class="fld-hint">Poora maal deliver ho raha ho to wahi rakhein. Aadha bhi ho sakta hai.</div></label>
     </div>
-    <div class="grid g3">
-      <label class="fld"><span>Pieces</span><input type="number" step="1" class="inp" id="dvPcs" value="${num(s.piecesTotal) - num(s.deliveredPcs || 0)}"/></label>
+    <div class="grid g2">
       <label class="fld"><span>Receiver ka naam</span><input class="inp" id="dvRecv" placeholder="e.g. Ahmed"/></label>
       <label class="fld"><span>Vehicle / Rider</span><input class="inp" id="dvRider" placeholder="optional"/></label>
     </div>
@@ -375,11 +374,11 @@ function openDeliveryForm(saleId) {
     const date = $('#dvDate', w).value || todayISO();
     const prevDel = num(s.deliveredKg);
     const newDel = round1(prevDel + kg);
-    const newPcs = num(s.deliveredPcs) + num($('#dvPcs', w).value);
+    const newPcs = 0;
     const full = newDel >= round1(num(s.kgTotal)) - 0.05;
     const rec = {
       id: uid('dlv'), saleId: s.id, invoiceNo: s.invoiceNo, customerId: s.customerId, date,
-      kg, pcs: num($('#dvPcs', w).value), receiver: $('#dvRecv', w).value || '', rider: $('#dvRider', w).value || '',
+      kg, pcs: 0, receiver: $('#dvRecv', w).value || '', rider: $('#dvRider', w).value || '',
       note: $('#dvNote', w).value || '', by: (DB.currentUser() || {}).name || '', createdAt: new Date().toISOString()
     };
     DB.upsert('deliveries', rec, { silent: true });
@@ -407,21 +406,18 @@ function printSaleSlip(saleId, size) {
   const p = paperProfile();
   const paper = size || printSizeFor('slip');
   const is58 = (paper === 'thermal58');
-  const acc = Biz.customerAccount(s.customerId);
 
   const lineRows = (s.lines || []).map((l, i) => {
     const pr = Biz.product(l.productId);
-    return { i: i + 1, name: (pr ? pr.name : l.productName) || 'Item', cat: l.category, kg: num(l.qtyKg), pcs: num(l.pcs), note: l.note || '' };
+    return { i: i + 1, name: Biz.lineName(l), kg: num(l.qtyKg), note: l.note || '' };
   });
-  /* ek hi item + category ko merge kar dein (slip chhoti rehti hai) */
+  /* ek hi item ko merge kar dein (slip chhoti rehti hai) */
   const merged = [];
   lineRows.forEach(r => {
-    const f = merged.find(m => m.name === r.name && m.cat === r.cat);
-    if (f) { f.kg = round1(f.kg + r.kg); f.pcs += r.pcs; } else merged.push(Object.assign({}, r));
+    const f = merged.find(m => m.name === r.name);
+    if (f) { f.kg = round1(f.kg + r.kg); } else merged.push(Object.assign({}, r));
   });
   const totalKg = round1(merged.reduce((a, r) => a + r.kg, 0));
-  const totalPcs = merged.reduce((a, r) => a + r.pcs, 0);
-  const catLines = Biz.catKeys().map(k => ({ k, kg: Biz.saleCatKg(s, k) })).filter(c => c.kg > 0);
 
   const title = shortDocTitle('WASH RECEIVING SLIP (SALE SLIP)', is58 ? 'thermal58' : 'thermal80');
 
@@ -436,17 +432,14 @@ function printSaleSlip(saleId, size) {
       <div class="tk"><span>Delivery Date:</span><b class="tk-b">${s.deliveryDate ? fmtDate(s.deliveryDate) : '____________'}</b></div>
     </div>
     <table class="pr-tbl">
-      <thead><tr><th style="width:${is58 ? '12%' : '8%'}">#</th><th>ITEM</th><th class="c" style="width:${is58 ? '20%' : '18%'}">CAT</th><th class="r" style="width:${is58 ? '18%' : '16%'}">KG</th><th class="r" style="width:${is58 ? '16%' : '14%'}">PCS</th></tr></thead>
+      <thead><tr><th style="width:${is58 ? '14%' : '10%'}">#</th><th>ITEM</th><th class="r" style="width:${is58 ? '28%' : '26%'}">KG</th></tr></thead>
       <tbody>
         ${merged.map(r => `<tr><td>${r.i}</td><td>${esc(r.name)}${r.note ? '<br><span class="small">' + esc(r.note) + '</span>' : ''}</td>
-          <td class="c">${esc(r.cat)}</td><td class="r">${fmtNum(r.kg, r.kg % 1 ? 1 : 0)}</td><td class="r">${r.pcs ? fmtNum(r.pcs) : '—'}</td></tr>`).join('')}
+          <td class="r">${fmtNum(r.kg, r.kg % 1 ? 1 : 0)}</td></tr>`).join('')}
       </tbody>
     </table>
     <table class="pr-tot">
       <tr class="grand"><td>TOTAL RECEIVED</td><td class="r">${fmtKg(totalKg)}</td></tr>
-      <tr><td>Total Pieces</td><td class="r"><b>${fmtNum(totalPcs)}</b></td></tr>
-      ${catLines.map(c => `<tr><td>&nbsp;&nbsp;— ${esc(c.k)} Category</td><td class="r">${fmtKg(c.kg)}</td></tr>`).join('')}
-      <tr><td>Delivery Pending</td><td class="r"><b>${fmtKg(acc.kgInFactory)}</b></td></tr>
     </table>
     <div class="pr-foot">
       <div class="small">Received by: ${esc(s.createdBy || '')} &middot; ${new Date().toLocaleString()}</div>
@@ -556,8 +549,6 @@ function printCustomInvoice(saleId, cfg) {
   const settledKg = round1((paidNow + Math.min(advHeld, grossPayable)) / rate);
   const balanceKg = round1(Math.max(0, kg + otherKg - settledKg));
 
-  /* kg breakdown per category for the bill */
-  const cats = Biz.catKeys().map(k => ({ k, kg: Biz.saleCatKg(s, k) })).filter(x => x.kg > 0);
   const cust = DB.get('customers', s.customerId) || {};
 
   const statement = `
@@ -585,20 +576,19 @@ function printCustomInvoice(saleId, cfg) {
       </div>
     </div>
     <table class="pr-tbl">
-      <thead><tr><th style="width:24px">#</th><th>Description</th><th class="c" style="width:60px">Category</th>
-        <th class="r" style="width:60px">Qty (KG)</th><th class="r" style="width:74px">Rate</th><th class="r" style="width:86px">Amount</th></tr></thead>
+      <thead><tr><th style="width:24px">#</th><th>Description</th>
+        <th class="r" style="width:70px">Qty (KG)</th><th class="r" style="width:80px">Rate</th><th class="r" style="width:92px">Amount</th></tr></thead>
       <tbody>
         ${(s.lines || []).map((l, i) => {
     const p = Biz.product(l.productId);
-    return `<tr><td>${i + 1}</td><td>${esc((p ? p.name : l.productName) || 'Wash')}<br><span class="small">${num(l.pcs) ? l.pcs + ' pcs' : ''}${l.note ? ' · ' + esc(l.note) : ''}</span></td>
-          <td class="c">${esc(l.category || '')}</td><td class="r">${fmtNum(l.qtyKg, 1)}</td><td class="r">${fmtNum(rate)}</td>
+    return `<tr><td>${i + 1}</td><td>${esc(Biz.lineName(l))}${l.note ? '<br><span class="small">' + esc(l.note) + '</span>' : ''}</td>
+          <td class="r">${fmtNum(l.qtyKg, 1)}</td><td class="r">${fmtNum(rate)}</td>
           <td class="r">${fmtNum(round2(num(l.qtyKg) * rate))}</td></tr>`;
   }).join('')}
       </tbody>
     </table>
     <table class="pr-tot">
       <tr><td>Total Weight (billed)</td><td class="r"><b>${fmtKg(kg)}</b></td></tr>
-      ${cats.map(x => `<tr><td style="padding-left:18px" class="small">— ${esc(Biz.catLabel(x.k))}</td><td class="r small">${fmtKg(x.kg)}</td></tr>`).join('')}
       <tr><td>Wash Charges @ ${fmtMoney(rate)} / KG</td><td class="r">${fmtMoney(round2(kg * rate))}</td></tr>
       ${disc > 0 ? `<tr><td>Discount</td><td class="r">− ${fmtMoney(disc)}</td></tr>` : ''}
       <tr><td><b>This Invoice Amount</b></td><td class="r"><b>${fmtMoney(amount)}</b></td></tr>
@@ -637,9 +627,9 @@ function printDeliverySlip(saleId) {
         Delivery Date: <b>${fmtDate(s.deliveryDate || todayISO())}</b></div>
     </div>
     <table class="pr-tbl">
-      <thead><tr><th>Item</th><th class="c">Category</th><th class="r">KG</th><th class="r">Pcs</th></tr></thead>
-      <tbody>${(s.lines || []).map(l => `<tr><td>${esc((Biz.product(l.productId) || {}).name || l.productName || 'Item')}</td>
-        <td class="c">${esc(l.category)}</td><td class="r">${fmtNum(l.qtyKg, 1)}</td><td class="r">${fmtNum(l.pcs)}</td></tr>`).join('')}</tbody>
+      <thead><tr><th>Item</th><th class="r">KG</th></tr></thead>
+      <tbody>${(s.lines || []).map(l => `<tr><td>${esc(Biz.lineName(l))}</td>
+        <td class="r">${fmtNum(l.qtyKg, 1)}</td></tr>`).join('')}</tbody>
     </table>
     <table class="pr-tot">
       <tr><td>Total KG Received</td><td class="r"><b>${fmtKg(s.kgTotal)}</b></td></tr>

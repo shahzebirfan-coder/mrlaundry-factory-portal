@@ -15,7 +15,7 @@ function settingsPaint() {
   const s = DB.settings();
   const tabs = [
     ['shop', '🏪 Shop Profile'],
-    ['rate', '⚖️ Rate &amp; Categories'],
+    ['rate', '⚖️ Rate per KG'],
     ['cloud', '☁️ Cloud Sync'],
     ['backup', '💾 Backup &amp; Data'],
     ['about', 'ℹ️ Help']
@@ -156,7 +156,7 @@ function settingsPaint() {
         <div class="card">
           <div class="card-head"><h3>⚖️ Per KG Rate</h3></div>
           <div class="card-body">
-            <div class="note-box info tiny mb10">Aap ne “ek rate sab ke liye” choose kiya hai — A/B/C category sirf KG record aur grading ke liye hai. Bill total KG × rate par banta hai.</div>
+            <div class="note-box info tiny mb10">Billing <b>total KG × rate</b> par banti hai — sab items aur sab customers ke liye ek hi rate.</div>
             <div class="row" style="gap:8px;align-items:end">
               <label class="fld mb0 flex1"><span>Rate per KG (Rs)</span>
                 <input type="number" step="1" class="inp" id="stRate" value="${num(s.ratePerKg)}"/></label>
@@ -168,23 +168,7 @@ function settingsPaint() {
             <div class="divider"></div>
             <div class="kv"><span>Example: 10 kg wash</span><b>${fmtMoney(round2(10 * num(s.ratePerKg)))}</b></div>
             <div class="kv"><span>Example: 240 kg wash</span><b>${fmtMoney(round2(240 * num(s.ratePerKg)))}</b></div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-head"><h3>🏷️ Categories (A / B / C)</h3><div class="sp"></div>
-            <button class="btn btn-ghost btn-sm" id="stAddCat">➕ Add Category</button></div>
-          <div class="card-body">
-            <div id="catList">
-              ${(s.categories || []).map((c, i) => `
-                <div class="row mb10" style="gap:8px;align-items:end" data-catrow="${i}">
-                  <label class="fld mb0" style="width:90px"><span>Key</span><input class="inp" data-catkey value="${esc(c.key)}"/></label>
-                  <label class="fld mb0 flex1"><span>Label</span><input class="inp" data-catlabel value="${esc(c.label)}"/></label>
-                  <label class="fld mb0 flex1"><span>Description</span><input class="inp" data-catdesc value="${esc(c.desc || '')}"/></label>
-                  <label class="fld mb0" style="width:70px"><span>Colour</span><input type="color" class="inp" data-catcolor value="${esc(c.color)}" style="padding:2px;height:40px"/></label>
-                  <button class="icon-btn" data-catdel="${i}">🗑️</button>
-                </div>`).join('')}
-            </div>
-            <button class="btn btn-primary mt10" id="stSaveCats">💾 Save Categories</button>
+            <div class="kv"><span>Purani entry par purana rate</span><b>Ledger → Receive Payment → “Kis rate par?”</b></div>
           </div>
         </div>
       </div>
@@ -210,32 +194,6 @@ function settingsPaint() {
       toast('✔ Rate update ho gaya', 'success');
       settingsPaint();
     };
-    $('#stAddCat').onclick = () => {
-      const cats = (DB.settings().categories || []).slice();
-      const key = String.fromCharCode(65 + cats.length);
-      cats.push({ key, label: key + ' Category', color: '#7c5cff', desc: '' });
-      DB.saveSettings({ categories: cats });
-      settingsPaint();
-    };
-    $$('[data-catdel]', pane).forEach(b => b.onclick = () => {
-      const cats = (DB.settings().categories || []).slice();
-      cats.splice(+b.dataset.catdel, 1);
-      DB.saveSettings({ categories: cats });
-      settingsPaint();
-    });
-    $('#stSaveCats').onclick = () => {
-      const cats = $$('[data-catrow]', pane).map(r => ({
-        key: r.querySelector('[data-catkey]').value.trim().toUpperCase() || 'A',
-        label: r.querySelector('[data-catlabel]').value.trim(),
-        desc: r.querySelector('[data-catdesc]').value.trim(),
-        color: r.querySelector('[data-catcolor]').value
-      }));
-      if (!cats.length) return toast('Kam az kam ek category rakhein', 'error');
-      DB.saveSettings({ categories: cats });
-      DB.audit('settings', 'Categories update hui');
-      toast('✔ Categories save ho gayi', 'success');
-      settingsPaint();
-    };
     $('#stSaveCats2').onclick = () => {
       DB.saveSettings({
         expenseCategories: $('#stExpCats', pane).value.split(',').map(x => x.trim()).filter(Boolean),
@@ -245,56 +203,87 @@ function settingsPaint() {
     };
   }
 
-  /* ---------------- CLOUD SYNC ---------------- */
+  /* ---------------- CLOUD SYNC (v2 — config device par save hoti hai) ---------------- */
   if (SetUI.tab === 'cloud') {
-    const cfg = Cloud.parseConfig(s.firebaseConfig);
+    const cfg = Cloud.cfg;
+    const st = Cloud.statusLabel();
+    const dot = Cloud.dotColor();
+    const shops = Cloud._shops || [];
     pane.innerHTML = `
       <div class="grid g-2-1">
         <div class="card">
-          <div class="card-head"><h3>☁️ Firebase Cloud Sync (optional)</h3><div class="sp"></div>
-            <span class="pill ${s.cloudEnabled ? 'pill-ok' : 'pill-muted'}">${s.cloudEnabled ? 'ON' : 'OFF'}</span></div>
+          <div class="card-head"><h3>☁️ Firebase Cloud Sync</h3><div class="sp"></div>
+            <span class="pill ${Cloud.ready ? 'pill-ok' : 'pill-muted'}">${Cloud.ready ? (Cloud.cfg.enabled ? 'ON' : 'READY') : 'OFF'}</span></div>
           <div class="card-body">
-            <div class="note-box info tiny mb10">
-              Cloud ke bina bhi portal poora chalta hai (data aap ke browser mein save hota hai).
-              Cloud ON karne se <b>aap ke bane hue Firebase project</b> par data sync ho jata hai —
-              doosre device/phone se bhi same data milta hai.
+            <div class="note-box ok tiny mb10">
+              🔒 <b>Config ab is device par alag save hoti hai</b> — cloud se data aane par bhi kabhi delete nahi hoti.
+              Cloud par sirf aap ka <b>business data</b> jata hai (sales, customers, payments…).
             </div>
-            <label class="fld"><span>Firebase databaseURL / Config</span>
-              <textarea class="inp" id="stCfg" style="min-height:96px" placeholder='https://your-project-default-rtdb.firebaseio.com'>${esc(s.firebaseConfig || '')}</textarea>
-              <div class="fld-hint">Sirf URL bhi chalega. Ya Firebase console se poora config snippet paste kar dein (hum databaseURL khud nikal lete hain).</div></label>
-            <label class="fld"><span>Shop ID (agar ek hi Firebase par 2 portals hain to alag rakhein)</span>
-              <input class="inp" id="stShopId" value="${esc(s.shopId || 'factory-main')}" placeholder="factory-main"/>
-              <div class="fld-hint">Purane shop portal se alag rakhne ke liye yahan alag naam likhein — data mix nahi hoga.</div></label>
-            <div class="row" style="gap:8px">
+
+            <label class="fld"><span>Firebase databaseURL</span>
+              <textarea class="inp" id="stCfg" style="min-height:70px" placeholder="https://mrlaundryfactory-default-rtdb.firebaseio.com">${esc(cfg.url || '')}</textarea>
+              <div class="fld-hint">Sirf URL chalega, ya console ka poora config snippet paste kar dein (hum databaseURL khud nikal lete hain).</div></label>
+
+            <label class="fld"><span>Shop ID (is data-set ka naam)</span>
+              <input class="inp" id="stShopId" value="${esc(cfg.shopId || 'main')}" placeholder="main"/>
+              <div class="fld-hint">Har device par <b>yehi Shop ID</b> honi chahiye taake sab ek hi data dekhein. Do alag kaam (factory / shop) ke liye Shop ID alag rakhein.</div></label>
+
+            ${shops.length ? `<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:4px">
+              <span class="tiny muted" style="align-self:center">Is database mein maujood data-sets:</span>
+              ${shops.map(k => `<button class="btn ${k === cfg.shopId ? 'btn-primary' : 'btn-ghost'} btn-xs" data-shopset="${esc(k)}">${esc(k)}</button>`).join('')}
+            </div>` : `<div class="tiny muted" style="margin-top:4px">Data-sets dekhne ke liye <b>Test Connection</b> dabayein.</div>`}
+
+            <div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap">
+              <button class="btn btn-primary" id="stSaveCfg">💾 Save &amp; Connect</button>
               <button class="btn btn-ghost" id="stTest">🔌 Test Connection</button>
-              <button class="btn btn-primary" id="stSaveCfg">💾 Save Config</button>
             </div>
             <div class="divider"></div>
-            <label class="row" style="gap:8px;font-weight:800"><input type="checkbox" id="stCloudOn" ${s.cloudEnabled ? 'checked' : ''}/> Cloud Sync ON karein</label>
-            <div class="row mt10" style="gap:8px">
-              <button class="btn btn-success btn-sm" id="stPush">⬆️ Abhi Cloud par Bhejein (Push)</button>
-              <button class="btn btn-ghost btn-sm" id="stPull">⬇️ Cloud se Lein (Pull)</button>
+            <label class="row" style="gap:8px;font-weight:800"><input type="checkbox" id="stCloudOn" ${cfg.enabled ? 'checked' : ''}/> Cloud Sync ON (auto sync)</label>
+            <div class="row mt10" style="gap:8px;flex-wrap:wrap">
+              <button class="btn btn-success btn-sm" id="stPush">⬆️ Cloud par bhejein (is device ka data)</button>
+              <button class="btn btn-warn btn-sm" id="stPull">⬇️ Cloud se laayein (dusre device ka data)</button>
             </div>
-            <div class="tiny muted mt10">Status: ${esc(Cloud.statusLabel())}${cfg ? ' · URL: ' + esc(cfg.url) : ''}</div>
+            <div class="tiny muted mt10">Status: <b style="color:${dot}">${esc(st)}</b></div>
           </div>
         </div>
+
         <div class="card">
-          <div class="card-head"><h3>🔧 Naya Firebase Project — 5 minute setup</h3></div>
-          <div class="card-body small" style="line-height:1.9">
-            <b>1.</b> <a href="https://console.firebase.google.com" target="_blank">console.firebase.google.com</a> → <b>Add project</b> → naam e.g. <i>mr-laundry-factory</i>.<br>
-            <b>2.</b> Left menu → <b>Build → Realtime Database</b> → <b>Create Database</b> → location sindh/asia → <b>Start in test mode</b>.<br>
-            <b>3.</b> Database ke top par URL milega — e.g. <span class="mono">https://mr-laundry-factory-default-rtdb.firebaseio.com</span> — woh copy kar ke yahan paste kar dein.<br>
-            <b>4.</b> <b>Rules</b> tab mein yeh likh dein (test ke liye) aur Publish karein:
-            <pre class="codesnip">{
+          <div class="card-head"><h3>📡 Sync Report (diagnostics)</h3></div>
+          <div class="card-body">
+            <div class="kv"><span>Device par config saved</span><b class="${Cloud.cfgSaved() ? 't-ok' : 't-bad'}">${Cloud.cfgSaved() ? '✔ Haan' : '— Nahi'}</b></div>
+            <div class="kv"><span>URL</span><b class="tiny">${esc(Cloud.url || '—')}</b></div>
+            <div class="kv"><span>Shop ID</span><b>${esc(Cloud.shopId || '—')}</b></div>
+            <div class="kv"><span>Cloud sync</span><b>${Cloud.cfg.enabled ? 'ON' : 'OFF'}</b></div>
+            <div class="kv"><span>Last push (yahan se gaya)</span><b class="tiny">${Cloud._lastPushedAt ? new Date(Cloud._lastPushedAt).toLocaleString() : '—'}</b></div>
+            <div class="kv"><span>Last pull (yahan aaya)</span><b class="tiny">${Cloud._lastPulledAt ? new Date(Cloud._lastPulledAt).toLocaleString() : '—'}</b></div>
+            <div class="kv"><span>Pending changes</span><b>${Cloud._pendingPush ? '<span class="t-warn">Bhejna baqi — auto retry chal raha hai</span>' : 'Kuch nahi ✔'}</b></div>
+            ${Cloud._lastError ? `<div class="note-box bad tiny mt10">⚠️ <b>Last error:</b> ${esc(Cloud._lastError)}
+              ${Cloud._lastErrorAt ? '<br><span class="tiny muted">' + new Date(Cloud._lastErrorAt).toLocaleString() + '</span>' : ''}
+              <br>Ziyada tar yeh Firebase <b>rules</b> ki wajah se hota hai — neeche wale rules dobara Publish kar dein.</div>` : ''}
+            <div class="note-box info tiny mt10">
+              <b>Naye computer par kya karna hai?</b><br>
+              1) Yahi portal link kholein → 2) apne username/password se login karein → bas!
+              Data khud aa jayega. (Config default URL se khud lag jati hai; sirf Shop ID wahi honi chahiye.)
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>🔧 Firebase Rules (ek dafa set karein)</h3></div>
+        <div class="card-body small" style="line-height:1.9">
+          Firebase Console → <b>Realtime Database → Rules</b> → yeh paste karke <b>Publish</b> karein:
+          <pre class="codesnip">{
   "rules": {
     "factories": {
       "$shop": { ".read": true, ".write": true }
     }
   }
 }</pre>
-            <b>5.</b> Yahan <b>Save Config</b> → <b>Test Connection</b> → <b>Cloud Sync ON</b> kar dein. Bas!<br>
-            <span class="t-warn">⚠️</span> Public rules sirf testing ke liye theek hain — baad mein Firebase Authentication laga kar rules tight karein.
-            <pre class="codesnip">{
+          <span class="t-warn">⚠️</span> Agar rules <i>test mode</i> ke 30 din pooray hone ki wajah se band ho gaye hon to sync chup-chaap ruk jata hai —
+          usi liye upar <b>diagnostics</b> mein error nazar aa jata hai. Rules Publish karne ke baad <b>Test Connection</b> daba dein.<br>
+          <b>Security behtar karni ho</b> (public link par bhi data band) to Firebase Authentication laga kar yeh rules use karein:
+          <pre class="codesnip">{
   "rules": {
     "factories": {
       "$shop": {
@@ -304,23 +293,29 @@ function settingsPaint() {
     }
   }
 }</pre>
-          </div>
         </div>
       </div>`;
-    $('#stSaveCfg').onclick = () => {
-      DB.saveSettings({ firebaseConfig: $('#stCfg', pane).value, shopId: $('#stShopId', pane).value || 'factory-main' });
-      Cloud.init();
-      toast('✔ Config save ho gaya', 'success');
+
+    $$('[data-shopset]', pane).forEach(b => b.onclick = async () => {
+      Cloud.setCfg({ shopId: b.dataset.shopset });
+      settingsPaint();
+      toast('Shop ID "' + b.dataset.shopset + '" set — ab pull kar rahe hain…', 'info');
+      Cloud._didInitialPull = true;
+      await Cloud.pull({ silent: false, force: true, ask: false });
+    });
+    $('#stSaveCfg').onclick = async () => {
+      await Cloud.saveAndConnect($('#stCfg', pane).value, $('#stShopId', pane).value || CLOUD_DEFAULT_SHOP, true);
       settingsPaint();
     };
     $('#stTest').onclick = async () => {
-      DB.saveSettings({ firebaseConfig: $('#stCfg', pane).value, shopId: $('#stShopId', pane).value || 'factory-main' });
+      Cloud.setCfg({ url: $('#stCfg', pane).value, shopId: $('#stShopId', pane).value || CLOUD_DEFAULT_SHOP }, { quiet: true });
+      Cloud.refresh();
       await Cloud.test();
       settingsPaint();
     };
     $('#stCloudOn').onchange = e => { Cloud.setEnabled(e.target.checked); settingsPaint(); };
-    $('#stPush').onclick = () => Cloud.push();
-    $('#stPull').onclick = () => Cloud.pull({ ask: true, force: false });
+    $('#stPush').onclick = () => Cloud.forcePush();
+    $('#stPull').onclick = () => Cloud.forcePull();
   }
 
   /* ---------------- BACKUP & DATA ---------------- */

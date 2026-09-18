@@ -44,6 +44,7 @@ function renderLogin() {
     toast('Welcome, ' + r.user.name + '!', 'success');
     app.current = '';
     app.go('dashboard');
+    if (typeof Cloud !== 'undefined') Cloud.onLogin();   // login par foran sync
   };
   $('#lgBtn').onclick = doLogin;
   $('#lgShow').onchange = e => { pass.type = e.target.checked ? 'text' : 'password'; };

@@ -182,7 +182,7 @@ function openCustomerProfile(id) {
 
   const kpis = `
     <div class="stats" style="margin-bottom:12px">
-      ${UI.statCard({ icon: '⚖️', label: 'Total Wash KG', value: fmtKg(acc.kgTotal), foot: acc.count + ' entries · ' + fmtNum(acc.piecesTotal) + ' pcs', tone: 'purple' })}
+      ${UI.statCard({ icon: '⚖️', label: 'Total Wash KG', value: fmtKg(acc.kgTotal), foot: acc.count + ' entries', tone: 'purple' })}
       ${UI.statCard({ icon: '🏭', label: 'In Factory', value: fmtKg(acc.kgInFactory), tone: acc.kgInFactory > 0 ? 'warn' : 'good' })}
       ${UI.statCard({ icon: '💰', label: 'Total Billed', value: fmtMoney(acc.amount), foot: 'Avg ' + fmtMoney(acc.kgTotal ? round2(acc.amount / acc.kgTotal) : 0) + '/kg', tone: 'info' })}
       ${UI.statCard({ icon: '📒', label: 'Balance Due', value: fmtMoney(acc.balance), foot: fmtKg(acc.kgBalance) + ' baqi' + (acc.advance > 0 ? ' · Adv ' + fmtMoney(acc.advance) : ''), tone: acc.balance > 0.009 ? 'bad' : 'good' })}

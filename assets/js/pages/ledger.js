@@ -61,7 +61,7 @@ function ledgerPaint() {
       <div class="card-body tight">
         <div class="grid g4" style="gap:10px">
           <div class="note-box info tiny"><b>Total Received (wash)</b><div class="big">${fmtKg(acc.kgTotal)}</div>
-            <span class="tiny">${acc.count} entries · ${fmtNum(acc.piecesTotal)} pcs</span></div>
+            <span class="tiny">${acc.count} entries</span></div>
           <div class="note-box tiny"><b>Total Billed</b><div class="big">${fmtMoney(acc.amount)}</div>
             <span class="tiny">Rate ${fmtMoney(acc.kgTotal ? round2(acc.amount / acc.kgTotal) : Biz.rate())}/kg</span></div>
           <div class="note-box ok tiny"><b>Total Paid</b><div class="big">${fmtMoney(acc.paid)}</div>
