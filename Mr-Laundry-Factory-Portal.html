@@ -1070,12 +1070,11 @@ function printTestSlip() {
   const paper = p.paper || 'thermal80';
   const rate = num(shop.ratePerKg) || 320;
   const rows = [
-    { i: 1, name: 'BEDSHEET WASH', cat: 'A', kg: 12.5, pcs: 4 },
-    { i: 2, name: 'SHOES / SNEAKERS', cat: 'A', kg: 6, pcs: 3 },
-    { i: 3, name: 'TOWEL DRY CLEAN', cat: 'B', kg: 4.5, pcs: 6 }
+    { i: 1, name: 'BEDSHEET WASH', kg: 12.5 },
+    { i: 2, name: 'SHOES / SNEAKERS', kg: 6 },
+    { i: 3, name: 'TOWEL DRY CLEAN', kg: 4.5 }
   ];
   const totalKg = round1(rows.reduce((a, r) => a + r.kg, 0));
-  const totalPcs = rows.reduce((a, r) => a + r.pcs, 0);
   const body = `
     ${printSlipHeader(shop, 'TEST PRINT')}
     <div class="pr-title">SALE SLIP (TEST)</div>
@@ -1087,16 +1086,12 @@ function printTestSlip() {
       <div class="tk"><span>Delivery Date:</span><b class="tk-b">____________</b></div>
     </div>
     <table class="pr-tbl">
-      <thead><tr><th style="width:9%">#</th><th>ITEM</th><th class="c" style="width:18%">CAT</th><th class="r" style="width:18%">KG</th><th class="r" style="width:16%">PCS</th></tr></thead>
-      <tbody>${rows.map(r => `<tr><td>${r.i}</td><td>${r.name}</td><td class="c">${r.cat}</td>
-        <td class="r">${fmtNum(r.kg, 1)}</td><td class="r">${r.pcs}</td></tr>`).join('')}</tbody>
+      <thead><tr><th style="width:12%">#</th><th>ITEM</th><th class="r" style="width:28%">KG</th></tr></thead>
+      <tbody>${rows.map(r => `<tr><td>${r.i}</td><td>${r.name}</td>
+        <td class="r">${fmtNum(r.kg, 1)}</td></tr>`).join('')}</tbody>
     </table>
     <table class="pr-tot">
       <tr class="grand"><td>TOTAL RECEIVED</td><td class="r">${fmtKg(totalKg)}</td></tr>
-      <tr><td>Total Pieces</td><td class="r"><b>${fmtNum(totalPcs)}</b></td></tr>
-      <tr><td>&nbsp;&nbsp;— A Category</td><td class="r">18.5 kg</td></tr>
-      <tr><td>&nbsp;&nbsp;— B Category</td><td class="r">4.5 kg</td></tr>
-      <tr><td>Delivery Pending</td><td class="r"><b>23 kg</b></td></tr>
     </table>
     <div class="pr-foot">
       <div class="small">Yeh TEST print hai (printer setting check). Rate: ${fmtMoney(rate)}/kg</div>
@@ -1282,7 +1277,9 @@ const DB = {
         { id: 'p_machinewash', name: 'Machine Wash + Dry', category: 'A', inputType: 'kg', unitPrice: 200, active: true, createdAt: now },
         { id: 'p_irononly', name: 'Iron / Press Only', category: 'B', inputType: 'kg', unitPrice: 200, active: true, createdAt: now },
         { id: 'p_dryclean', name: 'Dry Clean', category: 'B', inputType: 'kg', unitPrice: 200, active: true, createdAt: now },
-        { id: 'p_stain', name: 'Stain Removal / Special Treatment', category: 'C', inputType: 'kg', unitPrice: 200, active: true, createdAt: now }
+        { id: 'p_stain', name: 'Stain Removal / Special Treatment', category: 'C', inputType: 'kg', unitPrice: 200, active: true, createdAt: now },
+        { id: 'p_shoes', name: 'SHOES', category: 'A', inputType: 'kg', unitPrice: 320, active: true, createdAt: now,
+          types: ['Junior Shoes', 'Sports Shoes', 'Man Shoes', 'CH Shoes'] }
       ],
       sales: [], payments: [], expenses: [], purchases: [], vendors: [], vendorRequests: [],
       employees: [], salaries: [], drawings: [], deliveries: [], auditLog: [],
@@ -1323,6 +1320,13 @@ const DB = {
       'deliveries', 'auditLog'];
     tables.forEach(t => { if (!Array.isArray(d[t])) d[t] = seed[t]; });
     d.settings = Object.assign({}, seed.settings, d.settings || {});
+    /* ⚠️ Cloud config (URL / Shop ID / ON-OFF) DEVICE-LEVEL hai — synced
+       data se kabhi overwrite na ho (yehi "firebase remove ho gaya" ka fix hai) */
+    if (typeof Cloud !== 'undefined' && Cloud.cfg && Cloud.cfg.url) {
+      d.settings.cloudEnabled = !!Cloud.cfg.enabled;
+      d.settings.firebaseConfig = Cloud.cfg.url;
+      d.settings.shopId = Cloud.cfg.shopId;
+    }
     // Sirf khali/undefined fields ko default se bharein — user ki edited
     // values (shop name, phone, address) kabhi overwrite na hon.
     Object.keys(SHOP_DEFAULTS).forEach(k => {
@@ -1382,6 +1386,15 @@ const DB = {
     return true;
   },
   settings() { return this._data.settings; },
+  /** cloud config ka mirror (sirf is device par; cloud par push NAHI hota) */
+  setCloudMirror(c) {
+    if (!this._data) return;
+    const s = this._data.settings = this._data.settings || {};
+    s.cloudEnabled = !!(c && c.enabled);
+    s.firebaseConfig = (c && c.url) || '';
+    s.shopId = (c && c.shopId) || '';
+    try { SafeStore.set(DB_KEY, JSON.stringify(this._data)); } catch (e) {}
+  },
   saveSettings(patch) {
     this._data.settings = Object.assign({}, this._data.settings, patch || {});
     this.save();
@@ -1471,201 +1484,439 @@ const DB = {
 <!-- assets/js/cloud.js -->
 <script>
 /* ============================================================
-   CLOUD SYNC — optional Firebase Realtime Database (REST API)
+   CLOUD SYNC — Firebase Realtime Database (REST) — v2 (PAKKA)
    ------------------------------------------------------------
-   Settings → Cloud Sync mein apna Firebase databaseURL paste
-   karein. Uske baad portal:
-     • har save par data cloud par push karta hai (2s debounce)
-     • app open hone par cloud se latest data pull karta hai
-     • har 60 second baad check karta hai ke kisi doosre device ne
-       kuch naya likha hai ya nahi
-   Cloud OFF ho to portal sirf localStorage par chalta hai —
-   bilkul theek chalta hai, kuch miss nahi hoga.
+   ⚠️ PURANA MASLA (fix ho gaya):
+      Database URL / Shop ID pehle BUSINESS DATA ke andar
+      (settings.firebaseConfig) save hote the — jo cloud se sync
+      hota hai. Is liye jab kisi doosre system se data pull hota
+      tha to us ke khali config ne aap ka config mita diya →
+      "Firebase baar baar remove ho jata hai".
+
+   ✅ AB KA TAREeqA:
+      • URL + Shop ID + ON/OFF sirf IS DEVICE par save hote hain
+        (localStorage key: mlfCloudCfg) — cloud par nahi jate.
+      • Cloud par sirf business data jata hai (sales, customers…).
+      • Pull ke baad config wapis apne aap lag jati hai (kabhi
+        delete nahi hoti).
+      • Naye system par portal kholte hi data khud aa jata hai —
+        default URL + auto shop-detect ki madad se.
+      • Push sirf pehla pull hone ke BAAD hota hai, taake naye
+        device ka khali/demo data cloud ka asli data na mita de.
    ============================================================ */
 
-const Cloud = {
-  enabled: false,
-  url: '',
-  shopId: '',
-  ready: false,
-  _pushTimer: null,
-  _pollTimer: null,
-  _applying: false,
-  _lastPushedAt: '',
-  _busy: false,
+const CLOUD_CFG_KEY = 'mlfCloudCfg';
+const CLOUD_DEFAULT_URL = 'https://mrlaundryfactory-default-rtdb.firebaseio.com';
+const CLOUD_DEFAULT_SHOP = 'main';
+const CLOUD_POLL_MS = 25000;                       // har 25 sec check
+const CLOUD_DEVICE_KEYS = ['cloudEnabled', 'firebaseConfig', 'shopId'];   // device-level → cloud par kabhi nahi
 
+const Cloud = {
+  /* is device ka config (cloud par nahi jata) */
+  cfg: { url: '', shopId: CLOUD_DEFAULT_SHOP, enabled: true },
+
+  /* runtime */
+  enabled: false, url: '', shopId: '', ready: false,
+  _pushTimer: null, _pollTimer: null,
+  _applying: false, _busy: false,
+  _lastPushedAt: '', _lastPulledAt: '', _lastError: '', _lastErrorAt: '',
+  _pendingPush: false, _didInitialPull: false, _pulling: null, _bound: false, _forceNextPush: false,
+  _shops: [],
+
+  /* ============================================================
+     CONFIG — is device par mehfooz (cloud par NAHI)
+     ============================================================ */
   parseConfig(text) {
     const t = String(text || '').trim();
     if (!t) return null;
-    // 1) plain URL
     if (/^https?:\/\//i.test(t)) return { url: t.replace(/\/+$/, '') };
-    // 2) JSON snippet from Firebase console
     try {
       const j = JSON.parse(t);
       const u = j.databaseURL || j.databaseUrl || j.url;
       if (u) return { url: String(u).replace(/\/+$/, '') };
     } catch (e) { /* ignore */ }
-    // 3) js snippet with databaseURL: "..."
     const m = t.match(/databaseURL\s*:\s*["']([^"']+)["']/i);
     if (m) return { url: m[1].replace(/\/+$/, '') };
     return null;
   },
 
-  init() {
-    const s = DB.settings();
-    this.enabled = !!s.cloudEnabled;
-    this.shopId = (s.shopId || 'main').replace(/[^a-zA-Z0-9_-]/g, '');
-    const c = this.parseConfig(s.firebaseConfig);
-    this.url = c ? c.url : '';
+  /** config load — alag key se; pehli dafa purane (settings wale) config ko migrate karta hai */
+  loadCfg() {
+    let c = null;
+    try { c = JSON.parse(SafeStore.get(CLOUD_CFG_KEY) || 'null'); } catch (e) { c = null; }
+    const s = (DB.settings && DB.settings()) || {};
+    const legacy = this.parseConfig(s.firebaseConfig);
+    if (!c || typeof c !== 'object') c = {};
+    if (!c.url) c.url = (legacy && legacy.url) || CLOUD_DEFAULT_URL;
+    if (!c.shopId) c.shopId = String(s.shopId || '').trim() || CLOUD_DEFAULT_SHOP;
+    if (c.enabled === undefined || c.enabled === null) c.enabled = (s.cloudEnabled === undefined ? true : !!s.cloudEnabled);
+    this.setCfg(c, { quiet: true });
+    return this.cfg;
+  },
+
+  /** config save (hamesha is device par; mirror sirf UI ke liye) */
+  setCfg(patch, opts) {
+    const o = opts || {};
+    const merged = Object.assign({}, this.cfg, patch || {});
+    const parsed = this.parseConfig(merged.url);
+    this.cfg = {
+      url: parsed ? parsed.url : '',
+      shopId: String(merged.shopId || CLOUD_DEFAULT_SHOP).replace(/[^a-zA-Z0-9_-]/g, '') || CLOUD_DEFAULT_SHOP,
+      enabled: !!merged.enabled,
+      savedAt: new Date().toISOString()
+    };
+    SafeStore.set(CLOUD_CFG_KEY, JSON.stringify(this.cfg));
+    if (DB.setCloudMirror) DB.setCloudMirror(this.cfg);   // settings mein sirf dikhane ke liye
+    if (!o.quiet) this.refresh();
+    return this.cfg;
+  },
+
+  cfgSaved() { return !!(this.cfg && this.cfg.url); },
+
+  /* URL se config: index.html?cloud=<db-url>&shop=<shop-id>
+     Isse naye system par sirf link kholna kaafi hota hai — data khud sync ho jata hai. */
+  applyUrlCfg() {
+    try {
+      const qp = new URLSearchParams(location.search || '');
+      const qUrl = qp.get('cloud') || qp.get('firebase') || qp.get('db');
+      const qShop = qp.get('shop') || qp.get('shopId');
+      if (qUrl) this.setCfg({ url: qUrl, shopId: qShop || this.cfg.shopId, enabled: true }, { quiet: true });
+      else if (qShop) this.setCfg({ shopId: qShop }, { quiet: true });
+    } catch (e) { /* ignore */ }
+  },
+
+  /* ============================================================
+     INIT / STARTUP
+     ============================================================ */
+  refresh() {
+    this.enabled = !!this.cfg.enabled;
+    this.url = this.cfg.url;
+    this.shopId = this.cfg.shopId;
     this.ready = !!(this.enabled && this.url);
-    if (this.ready) {
-      this.pull({ silent: true });
-      this.startPolling();
-    }
     this.updateDot();
+    if (this.ready) { this.startPolling(); this.bindAutoSync(); }
+    else this.stopPolling();
+    return this.ready;
   },
 
-  statusLabel() {
-    if (!this.enabled) return 'Cloud sync: OFF (local storage)';
-    if (!this.url) return 'Cloud sync: ON — lekin databaseURL missing ⚠️';
-    if (this._busy) return 'Cloud: syncing…';
-    return 'Cloud: ON · ' + (this._lastPushedAt ? 'last sync ' + new Date(this._lastPushedAt).toLocaleTimeString() : 'connected');
-  },
-  updateDot() {
-    const d = $('#cloudDot'); if (d) d.textContent = this.statusLabel();
+  /** boot par — config load + pehla sync (promise return karta hai) */
+  init() {
+    this.loadCfg();
+    this.applyUrlCfg();     // ?cloud=URL&shop=ID — ek link se naya device set ho jata hai
+    this.refresh();
+    if (!this.ready) { this._didInitialPull = true; return null; }
+    if (!this._pulling) {
+      this._pulling = this.firstSync().catch(e => { this._lastError = e.message; this.updateDot(); });
+    }
+    return this._pulling;
   },
 
+  async firstSync() {
+    await this.autoPickShop();                 // galat shop id ho to sahi wali khud pakar le.
+    await this.pull({ silent: true, startup: true });
+    this._didInitialPull = true;
+    if (this._pendingPush && !this.localIsEmpty()) { this._pendingPush = false; await this.push(true); }
+    this.startPolling();
+    this.updateDot();
+    return true;
+  },
+
+  /** database mein jitne shop ids (datasets) hain */
+  async listShops() {
+    if (!this.url) return [];
+    try {
+      const o = await this._fetchJSON(this.url + '/factories.json?shallow=true');
+      this._shops = o ? Object.keys(o) : [];
+    } catch (e) { this._shops = []; }
+    return this._shops;
+  },
+
+  /** naya system: agar default shop khali hai aur sirf ek hi shop mein data hai → wohi le lein */
+  async autoPickShop() {
+    try {
+      const shops = await this.listShops();
+      if (!shops.length) return null;
+      if (shops.indexOf(this.shopId) >= 0) return this.shopId;
+      if (shops.length === 1) {
+        const pick = shops[0];
+        this.setCfg({ shopId: pick }, { quiet: true });
+        this.refresh();
+        if (!SafeStore.get('mlfShopAutoPickShown')) {
+          SafeStore.set('mlfShopAutoPickShown', pick);
+          toast('Cloud par data "' + pick + '" ke andar mila — usi se sync ho raha hai', 'info', 5000);
+        }
+        return pick;
+      }
+      return null;   // ek se ziyada → Settings → Cloud Sync se choose karein
+    } catch (e) { return null; }
+  },
+
+  /** login hone par foran sync */
+  onLogin() { if (this.ready) this.pull({ silent: true }); },
+
+  /** window focus / online hone par sync */
+  bindAutoSync() {
+    if (this._bound) return;
+    this._bound = true;
+    const kick = () => { if (this.ready && !document.hidden) this.tick(); };
+    window.addEventListener('focus', kick);
+    window.addEventListener('online', () => { kick(); if (this._pendingPush) this.push(true); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) kick(); });
+  },
+
+  /* ============================================================
+     NETWORK HELPERS
+     ============================================================ */
   path(suffix) { return this.url + '/factories/' + (this.shopId || 'main') + '/' + suffix + '.json'; },
 
   async _fetchJSON(url, opts) {
     const r = await fetch(url, Object.assign({ cache: 'no-store' }, opts || {}));
-    if (!r.ok) throw new Error('HTTP ' + r.status);
+    if (!r.ok) throw new Error('HTTP ' + r.status + (r.status === 401 || r.status === 403 ? ' (rules / permission)' : ''));
     const txt = await r.text();
     if (!txt || txt === 'null') return null;
     try { return JSON.parse(txt); } catch (e) { return null; }
   },
 
-  /* ---------- PUSH ---------- */
+  /* ============================================================
+     PUSH — is device ka data cloud par
+     ============================================================ */
   pushDebounced() {
     if (!this.ready || this._applying) return;
     clearTimeout(this._pushTimer);
-    this._pushTimer = setTimeout(() => this.push(), 2000);
+    this._pushTimer = setTimeout(() => this.push(true), 1500);
   },
 
   async push(silent) {
-    if (!this.ready || this._busy) return;
+    if (!this.ready || this._busy) return false;
+    if (!this._didInitialPull) { this._pendingPush = true; return false; }
+    /* SAFETY: khali naya device apna khali data cloud par na bheje (cloud ka asli data bach jaye) */
+    if (this.localIsEmpty() && !this._forceNextPush) { this._pendingPush = false; this.updateDot(); return false; }
+    this._forceNextPush = false;   // pehle pull — naye device ka khali data cloud na mita de
     this._busy = true;
     const stamp = new Date().toISOString();
     try {
       const payload = JSON.parse(JSON.stringify(DB._data));
+      /* device-level config hamesha strip: cloud par sirf business data */
+      payload.settings = payload.settings || {};
+      CLOUD_DEVICE_KEYS.forEach(k => { delete payload.settings[k]; });
       payload._updatedAt = stamp;
       payload._updatedBy = (DB.currentUser() || {}).name || 'device';
       await this._fetchJSON(this.path('data'), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
       await this._fetchJSON(this.path('meta'), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ updatedAt: stamp, by: payload._updatedBy, app: 'Mr Laundry Factory Portal' })
       });
       this._lastPushedAt = stamp;
+      this._lastError = '';
+      this._pendingPush = false;
       DB._data._updatedAt = stamp;
       SafeStore.set('mlfLastCloudPush', stamp);
       if (!silent) toast('Cloud par save ho gaya ✔', 'success');
+      return true;
     } catch (e) {
-      if (!silent) toast('Cloud push fail: ' + e.message + ' — internet / rules check karein', 'error', 5000);
+      this._lastError = e.message; this._lastErrorAt = new Date().toISOString();
+      this._pendingPush = true;                                   // offline → auto retry
+      if (!silent) toast('Cloud push fail: ' + e.message + ' — internet / Firebase rules check karein', 'error', 6000);
+      return false;
     } finally {
       this._busy = false;
       this.updateDot();
     }
   },
 
-  /* ---------- PULL ---------- */
+  /* ============================================================
+     PULL — cloud se data (config kabhi overwrite nahi hoti)
+     ============================================================ */
+  localIsEmpty() {
+    const d = DB._data || {};
+    const n = ['sales', 'payments', 'expenses', 'purchases', 'employees', 'salaries', 'drawings', 'deliveries']
+      .reduce((a, t) => a + ((d[t] || []).length), 0);
+    return n === 0 && (d.customers || []).length === 0;
+  },
+
+  applyRemote(remote) {
+    this._applying = true;
+    const keepCfg = Object.assign({}, this.cfg);        // ⚠️ config mehfooz
+    const keepUser = DB.currentUser();
+    remote.settings = Object.assign({}, remote.settings || {});
+    DB._data = remote;
+    DB._migrate();                                     // tables/defaults
+    DB.setCloudMirror(keepCfg);                        // config wapis
+    if (keepUser) {                                    // login session barqarar
+      const still = (DB._data.users || []).find(u => u && u.id === keepUser.id);
+      if (!still) DB._data.users.push(keepUser);
+    }
+    DB.save();                                         // (_applying = true → push nahi hoga)
+    this._applying = false;
+    this._lastPulledAt = new Date().toISOString();
+    this._lastError = '';
+    this._pendingPush = false;
+    SafeStore.set('mlfLastCloudPull', this._lastPulledAt);
+  },
+
   async pull(opts) {
     const o = opts || {};
-    if (!this.ready) { if (!o.silent) toast('Pehle Cloud Sync on karein (Settings)', 'warn'); return false; }
+    if (!this.ready) { if (!o.silent) toast('Pehle Cloud Sync ON karein (Settings → Cloud Sync)', 'warn'); return false; }
+    if (this._busy) return false;
     this._busy = true;
     this.updateDot();
     try {
       const remote = await this._fetchJSON(this.path('data'));
       this._busy = false;
-      this.updateDot();
       if (!remote) {
-        if (!o.silent) toast('Cloud khali hai — pehle push ho jaye ga', 'info');
+        this._lastError = ''; this.updateDot();
+        if (!o.silent) toast('Cloud khali hai — "Cloud par bhejein" dabayein taake yeh data upload ho jaye', 'info', 5000);
         return false;
       }
       const rTime = Date.parse(remote._updatedAt || 0) || 0;
       const lTime = Date.parse(DB._data._updatedAt || 0) || 0;
-      if (rTime <= lTime && !o.force) {
-        if (!o.silent) toast('Local data already latest hai ✔', 'success');
+      const fresh = this.localIsEmpty();
+      if (!fresh && rTime <= lTime && !o.force) {
+        this._lastError = ''; this.updateDot();
+        if (!o.silent) toast('Is device ka data already latest hai ✔', 'success');
         return false;
       }
       if (o.ask) {
         const yes = await confirmDialog(
-          'Cloud par naya data hai (' + new Date(rTime).toLocaleString() + ').\nCloud ka data le lein? Local changes overwrite ho jayenge.',
-          { title: 'Cloud Data Milega', yes: 'Haan, cloud se le lo' });
-        if (!yes) return false;
+          'Cloud par data hai (' + new Date(rTime || Date.now()).toLocaleString() + ').\nCloud ka data le lein? Is device ke local changes overwrite ho jayenge.',
+          { title: 'Cloud se data laayein', yes: 'Haan, cloud ka data le lo' });
+        if (!yes) { this.updateDot(); return false; }
       }
-      this._applying = true;
-      DB._data = remote;
-      DB._migrate();
-      DB.save();
-      this._applying = false;
-      toast('Cloud se data sync ho gaya ✔', 'success');
-      app.go(app.current || 'dashboard');
+      this.applyRemote(remote);
+      toast('Cloud se data sync ho gaya ✔ (' + fmtKg(Biz.sales().length ? Biz.sales().length : 0) + ' bills)', 'success', 3000);
+      if (DB.currentUser()) app.go(app.current || 'dashboard');
+      this.updateDot();
       return true;
     } catch (e) {
       this._busy = false;
+      this._lastError = e.message; this._lastErrorAt = new Date().toISOString();
       this.updateDot();
-      if (!o.silent) toast('Cloud pull fail: ' + e.message, 'error', 5000);
+      if (!o.silent) toast('Cloud pull fail: ' + e.message + ' — Firebase rules check karein', 'error', 6000);
       return false;
     }
   },
 
+  /* ============================================================
+     POLLING + retry
+     ============================================================ */
   startPolling() {
-    clearInterval(this._pollTimer);
-    this._pollTimer = setInterval(async () => {
-      if (!this.ready || this._busy || document.hidden) return;
-      try {
-        const meta = await this._fetchJSON(this.path('meta'));
-        if (!meta || !meta.updatedAt) return;
-        const rTime = Date.parse(meta.updatedAt) || 0;
-        const lTime = Date.parse(DB._data._updatedAt || 0) || 0;
-        if (rTime > lTime + 4000) {
-          toast('Doosre device se naya data aaya — sync ho raha hai…', 'info');
-          await this.pull({ silent: true });
-        }
-      } catch (e) { /* offline — ignore */ }
-    }, 60000);
+    if (this._pollTimer) return;
+    this._pollTimer = setInterval(() => this.tick(), CLOUD_POLL_MS);
+  },
+  stopPolling() { clearInterval(this._pollTimer); this._pollTimer = null; },
+
+  async tick() {
+    if (!this.ready || this._busy || document.hidden) return;
+    if (this._pendingPush) { await this.push(true); return; }      // offline changes bhej dein
+    try {
+      const meta = await this._fetchJSON(this.path('meta'));
+      const rTime = meta && meta.updatedAt ? (Date.parse(meta.updatedAt) || 0) : 0;
+      const lTime = Date.parse(DB._data._updatedAt || 0) || 0;
+      if (!meta) { await this.pull({ silent: true }); return; }
+      if (rTime > lTime + 4000) {
+        toast('Doosre device se naya data aaya — sync ho raha hai…', 'info');
+        await this.pull({ silent: true });
+      } else if (this._lastError) { this._lastError = ''; this.updateDot(); }
+    } catch (e) {
+      this._lastError = e.message; this.updateDot();
+    }
   },
 
-  stopPolling() { clearInterval(this._pollTimer); },
-
+  /* ============================================================
+     TEST / ENABLE / MANUAL
+     ============================================================ */
   async test() {
-    const c = this.parseConfig(DB.settings().firebaseConfig);
-    if (!c) { toast('databaseURL sahi nahi lag raha. Format: https://xxxx-default-rtdb.firebaseio.com', 'error', 5000); return false; }
-    this.url = c.url;
-    this.shopId = (DB.settings().shopId || 'main').replace(/[^a-zA-Z0-9_-]/g, '');
+    if (!this.cfg.url) { toast('databaseURL khali hai', 'error'); return false; }
+    this.refresh();
     try {
-      await this._fetchJSON(this.path('data'), {
+      await this._fetchJSON(this.path('meta'), {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ping: new Date().toISOString(), by: 'setup-test' })
       });
-      toast('Connection OK ✔ Cloud ready hai', 'success');
+      this._lastError = '';
+      const shops = await this.listShops();
+      toast('Connection OK ✔ Firebase chal rahi hai' + (shops.length ? ' · Shops: ' + shops.join(', ') : ''), 'success', 5000);
+      this.updateDot();
       return true;
     } catch (e) {
-      toast('Connect nahi hua: ' + e.message + ' — rules ya URL check karein', 'error', 6000);
+      this._lastError = e.message; this._lastErrorAt = new Date().toISOString();
+      toast('Connect nahi hua: ' + e.message + ' — URL ya Firebase rules check karein', 'error', 7000);
+      this.updateDot();
       return false;
     }
   },
 
+  /** Settings → Save & Connect */
+  async saveAndConnect(url, shopId, enabled) {
+    this.setCfg({ url: url, shopId: shopId, enabled: enabled !== false });
+    this.refresh();
+    if (!this.ready) { toast('Config save ho gaya (cloud OFF)', 'warn'); return false; }
+    const ok = await this.test();
+    if (ok) { this._didInitialPull = true; await this.pull({ silent: true, startup: true }); }
+    return ok;
+  },
+
   setEnabled(on) {
-    DB.saveSettings({ cloudEnabled: !!on });
-    this.init();
-    if (on) this.push(true);
-    toast(on ? 'Cloud sync ON' : 'Cloud sync OFF — ab sirf local storage', on ? 'success' : 'warn');
+    this.setCfg({ enabled: !!on });
+    this.refresh();
+    if (on) { this._didInitialPull = true; this.pull({ silent: true }); this.push(true); }
+    toast(on ? 'Cloud Sync ON ✔ (config is device par mehfooz hai)' : 'Cloud Sync OFF — ab sirf local storage', on ? 'success' : 'warn');
+  },
+
+  async forcePush() { this._didInitialPull = true; this._forceNextPush = true; return this.push(false); },
+  async forcePull() { return this.pull({ ask: true, force: true }); },
+
+  /* ============================================================
+     STATUS
+     ============================================================ */
+  statusShort() {
+    if (!this.cfg.enabled) return 'OFF';
+    if (!this.cfg.url) return 'no URL';
+    if (this._busy) return 'syncing…';
+    if (this._lastError) return 'error';
+    if (this._pendingPush) return 'pending…';
+    const last = this._lastPulledAt || this._lastPushedAt;
+    return last ? 'ON · ' + new Date(last).toLocaleTimeString() : 'ON';
+  },
+
+  statusLabel() {
+    if (!this.cfg.enabled) return 'Cloud sync: OFF (data sirf is device par)';
+    if (!this.cfg.url) return 'Cloud sync: ON — lekin databaseURL khali ⚠️';
+    if (this._busy) return 'Cloud: sync ho raha hai…';
+    if (this._lastError) return 'Cloud: ERROR — ' + this._lastError;
+    if (this._lastPulledAt || this._lastPushedAt) {
+      return 'Cloud: ' + this.shopId + ' · last sync ' + new Date(this._lastPulledAt || this._lastPushedAt).toLocaleTimeString();
+    }
+    return 'Cloud: ' + this.shopId + ' · connected';
+  },
+
+  dotColor() {
+    if (!this.cfg.enabled || !this.cfg.url) return '#94a3b8';
+    if (this._lastError) return '#dc2626';
+    if (this._busy || this._pendingPush) return '#f59e0b';
+    return '#16a34a';
+  },
+
+  updateDot() {
+    const d = document.getElementById('cloudDot');
+    if (d) { d.textContent = this.statusLabel(); d.style.color = this.dotColor(); }
+    const chip = document.getElementById('cloudChip');
+    if (chip) {
+      chip.textContent = '☁️ ' + this.statusShort();
+      chip.style.color = this.dotColor();
+      chip.title = this.statusLabel() + ' — click: abhi sync karein';
+    }
+  },
+
+  async syncNow() {
+    if (!this.ready) { toast('Cloud ON nahi hai — Settings → Cloud Sync', 'warn'); return; }
+    toast('Sync ho raha hai…', 'info', 1500);
+    await this.pull({ silent: true });
+    if (this._pendingPush) await this.push(true);
+    this.updateDot();
   }
 };
 
@@ -1830,11 +2081,33 @@ const Biz = {
     return stats;
   },
 
+  /** line ka poora naam: "SHOES — Junior Shoes" (type ho to) */
+  lineName(l) {
+    const p = l && l.productId ? this.product(l.productId) : null;
+    const n = (p ? p.name : (l && l.productName)) || 'Item';
+    return (l && l.type) ? n + ' — ' + l.type : n;
+  },
+  /** ek item ke types (product par saved) */
+  productTypes(productId) {
+    const p = this.product(productId);
+    return (p && Array.isArray(p.types)) ? p.types.filter(Boolean) : [];
+  },
+  /** naya type naam item par SAVE karein (agli dafa khud nazar aayega). true = naya tha */
+  saveProductType(productId, name) {
+    name = String(name || '').trim();
+    if (!productId || !name) return false;
+    const p = this.product(productId);
+    if (!p) return false;
+    const list = Array.isArray(p.types) ? p.types.slice() : [];
+    if (list.indexOf(name) >= 0) return false;
+    list.push(name);
+    DB.upsert('products', Object.assign({}, p, { types: list }), { silent: true });
+    DB.save();
+    return true;
+  },
+
   saleLinesText(s) {
-    return (s.lines || []).map(l => {
-      const p = this.product(l.productId);
-      return (p ? p.name : (l.productName || 'Item')) + ' [' + (l.category || '-') + '] ' + fmtKg(l.qtyKg) + (num(l.pcs) ? ' / ' + num(l.pcs) + ' pcs' : '');
-    }).join(' • ');
+    return (s.lines || []).map(l => this.lineName(l) + ' ' + fmtKg(l.qtyKg)).join(' • ');
   },
   saleLinesShort(s) {
     const byCat = {};
@@ -1844,8 +2117,7 @@ const Biz = {
   saleItemsSummary(s) {
     const names = [];
     (s.lines || []).forEach(l => {
-      const p = this.product(l.productId);
-      const n = (p ? p.name : l.productName) || 'Item';
+      const n = this.lineName(l);
       if (names.indexOf(n) < 0) names.push(n);
     });
     return names.join(', ') || '—';
@@ -2070,7 +2342,7 @@ const Biz = {
           const cat = cats[Math.floor(Math.random() * 3)];
           const pool = prods.filter(p => p.category === cat);
           const p = pool[Math.floor(Math.random() * pool.length)] || prods[0];
-          lines.push({ id: uid('ln'), productId: p.id, category: cat, qtyKg: round1(2 + Math.random() * 25), pcs: Math.floor(Math.random() * 40), note: '' });
+          lines.push({ id: uid('ln'), productId: p.id, category: cat, qtyKg: round1(2 + Math.random() * 25), pcs: 0, note: '' });
         }
         inv++;
         const kg = round1(lines.reduce((a, l) => a + num(l.qtyKg), 0));
@@ -2080,7 +2352,7 @@ const Biz = {
           id: uid('sal'), invoiceNo: 'INV-' + String(inv).padStart(4, '0'), branchId: (DB.all('branches')[0] || {}).id,
           customerId: cid, entryDate: date, deliveryDate: delivered ? addDays(date, 1 + Math.floor(Math.random() * 3)) : '',
           status: delivered ? 'delivered' : 'open', lines, kgTotal: kg,
-          piecesTotal: lines.reduce((a, l) => a + num(l.pcs), 0), rate, amount: round2(kg * rate),
+          piecesTotal: 0, rate, amount: round2(kg * rate),
           paymentMode: Math.random() > 0.5 ? 'Cash' : 'Credit', amountPaidAtEntry: 0, note: '',
           createdBy: 'Demo', createdAt: new Date().toISOString()
         }, { silent: true });
@@ -2143,7 +2415,7 @@ const NAV = [
   { id: 'ledger', label: 'Payment Ledger', icon: '📒', sub: 'Payment, kg balance, statement' },
 
   { sec: 'Business' },
-  { id: 'products', label: 'Products', icon: '🧺', sub: 'Wash items, category, rate' },
+  { id: 'products', label: 'Products', icon: '🧺', sub: 'Wash items & rate' },
   { id: 'expenses', label: 'Expenses', icon: '💸', sub: 'Factory kharchay' },
   { id: 'purchases', label: 'Purchases', icon: '🛒', sub: 'Vendors se khareedari' },
   { id: 'vendorlist', label: 'Vendors', icon: '🏬', sub: 'Vendor requirements & payable' },
@@ -2159,12 +2431,12 @@ const NAV = [
 
 const PAGE_TITLES = {
   dashboard: ['Dashboard', 'Aapke factory ka poora business — aik nazar mein'],
-  newsales: ['New Sales — Wash Entry', 'Daily clients se aane wale kapre, category-wise KG ke saath record karein'],
+  newsales: ['New Sales — Wash Entry', 'Daily clients se aane wale kapre — items aur KG ke saath record karein'],
   sales: ['Order Invoices / Sales', 'Har entry ka status, delivery date aur billing'],
   delivery: ['Delivery Queue', 'Factory mein maujood kapre — age ke sath'],
   customers: ['Customers', 'Clients / vendor accounts'],
   ledger: ['Payment Ledger', 'Payment, kg ka hisaab aur running statement'],
-  products: ['Products', 'Wash items — category wise'],
+  products: ['Products', 'Wash items list'],
   expenses: ['Expenses', 'Factory ke rozmarra kharchay'],
   purchases: ['Purchases from Vendors', 'Bahir se kharida gaya maal'],
   vendorlist: ['Vendors', 'Vendors aur unki requirements'],
@@ -2173,7 +2445,7 @@ const PAGE_TITLES = {
   branches: ['Branches', 'Factory aur shop branches'],
   reports: ['Reports', 'Business analysis aur exports'],
   users: ['Users', 'Staff logins aur permissions'],
-  settings: ['Settings', 'Shop profile, rate, categories, cloud & backup']
+  settings: ['Settings', 'Shop profile, rate, printers, cloud & backup']
 };
 
 const UI = {
@@ -2244,6 +2516,7 @@ const UI = {
                 <input class="inp inp-sm gs" id="globalSearch" placeholder="🔍 Search customer / invoice…" autocomplete="off"/>
                 <div class="gs-drop" id="gsDrop"></div>
               </div>
+              <button class="icon-btn" id="cloudChip" title="Cloud sync" style="width:auto;padding:0 10px;font-size:12px;font-weight:800">☁️ ${Cloud.statusShort()}</button>
               <button class="icon-btn" id="themeBtn" title="Theme">${this.theme() === 'dark' ? '☀️' : '🌙'}</button>
               <button class="btn btn-primary btn-sm" id="quickNew">➕ New Sale</button>
               <button class="icon-btn" id="moreBtn" title="More">⋯</button>
@@ -2273,6 +2546,15 @@ const UI = {
       if (yes) { DB.logout(); app.go('login'); }
     };
     const tb = $('#themeBtn'); if (tb) tb.onclick = () => this.toggleTheme();
+    const cc = $('#cloudChip');
+    if (cc) {
+      cc.onclick = async () => {
+        if (!Cloud.ready) { app.go('settings'); setTimeout(() => { const b = document.querySelector('[data-st="cloud"]'); if (b) b.click(); }, 250); return; }
+        await Cloud.syncNow();
+        this.bindLayout(page);
+      };
+      Cloud.updateDot();
+    }
     const qn = $('#quickNew'); if (qn) {
       if (!DB.can('newsales')) qn.style.display = 'none';
       else qn.onclick = () => app.go('newsales');
@@ -2508,6 +2790,7 @@ function renderLogin() {
     toast('Welcome, ' + r.user.name + '!', 'success');
     app.current = '';
     app.go('dashboard');
+    if (typeof Cloud !== 'undefined') Cloud.onLogin();   // login par foran sync
   };
   $('#lgBtn').onclick = doLogin;
   $('#lgShow').onchange = e => { pass.type = e.target.checked ? 'text' : 'password'; };
@@ -2545,7 +2828,7 @@ function dashPaint() {
     <div class="stats">
       ${UI.statCard({
     icon: '⚖️', label: 'Total Received — ' + Period.shortLabel(), value: fmtKg(m.receivedKg),
-    foot: m.newEntries + ' entries · ' + fmtNum(m.receivedPcs) + ' pcs', tone: 'info',
+    foot: m.newEntries + ' entries', tone: 'info',
     clickable: true, attrs: 'data-goto="sales"'
   })}
       ${UI.statCard({
@@ -2555,7 +2838,7 @@ function dashPaint() {
   })}
       ${UI.statCard({
     icon: '🏭', label: 'Clothes in Factory Now', value: fmtKg(m.inFactoryKg),
-    foot: m.inFactoryCount + ' open orders · ' + fmtNum(m.inFactoryPcs) + ' pcs', tone: m.inFactoryKg > 0 ? 'warn' : 'good',
+    foot: m.inFactoryCount + ' open orders', tone: m.inFactoryKg > 0 ? 'warn' : 'good',
     clickable: true, attrs: 'data-goto="delivery"'
   })}
       ${UI.statCard({
@@ -2618,13 +2901,6 @@ function dashPaint() {
         <div class="kv"><span>Total billed (all time)</span><b>${fmtMoney(Biz.sales().reduce((a, s) => a + Biz.saleAmount(s), 0))}</b></div>
         <div class="kv"><span>Total collected (all time)</span><b>${fmtMoney(Biz.payments().reduce((a, p) => a + num(p.amount), 0))}</b></div>
       </div>
-    </div>`;
-
-  /* -------- category split + chart -------- */
-  const catCard = `
-    <div class="card">
-      <div class="card-head"><h3>🏷️ Category-wise KG — ${esc(Period.shortLabel())}</h3></div>
-      <div class="card-body">${UI.catDonut(m.catKg)}</div>
     </div>`;
 
   const chartCard = `
@@ -2713,7 +2989,7 @@ function dashPaint() {
     ${cards}
     <div class="grid g-2-1">
       <div>${plCard}${chartCard}${pendCard}</div>
-      <div>${quick}${recvCard}${catCard}${topCard}</div>
+      <div>${quick}${recvCard}${topCard}</div>
     </div>`;
 
   const dr = $('#dashRate', el); if (dr) dr.onclick = () => openRateForm();
@@ -2770,8 +3046,8 @@ function printMonthReport() {
     </div>
     <table class="pr-tbl">
       <tr><th colspan="2">SUMMARY</th></tr>
-      <tr><td>Total Received</td><td class="r"><b>${fmtKg(m.receivedKg)}</b> (${fmtNum(m.receivedPcs)} pcs)</td></tr>
-      <tr><td>Total Delivered</td><td class="r"><b>${fmtKg(m.deliveredKg)}</b> (${fmtNum(m.deliveredPcs)} pcs)</td></tr>
+      <tr><td>Total Received</td><td class="r"><b>${fmtKg(m.receivedKg)}</b></td></tr>
+      <tr><td>Total Delivered</td><td class="r"><b>${fmtKg(m.deliveredKg)}</b></td></tr>
       <tr><td>Clothes in Factory (now)</td><td class="r"><b>${fmtKg(m.inFactoryKg)}</b></td></tr>
       <tr><td>Total Income (billed)</td><td class="r"><b>${fmtMoney(m.income)}</b></td></tr>
       <tr><td>Cash Collected</td><td class="r"><b>${fmtMoney(m.collected)}</b></td></tr>
@@ -2780,12 +3056,6 @@ function printMonthReport() {
       <tr><td>Salaries</td><td class="r"><b>${fmtMoney(m.salaries)}</b></td></tr>
       <tr><td>Owner Drawings</td><td class="r"><b>${fmtMoney(m.drawings)}</b></td></tr>
       <tr><td><b>Net Profit / Loss</b></td><td class="r"><b>${fmtMoney(m.profit)}</b></td></tr>
-    </table>
-    <div style="margin-top:10px"></div>
-    <table class="pr-tbl">
-      <tr><th>Category</th><th class="r">KG Received</th><th class="r">Share</th></tr>
-      ${Biz.catKeys().map(k => `<tr><td>${esc(Biz.catLabel(k))}</td><td class="r">${fmtKg(m.catKg[k] || 0)}</td>
-        <td class="r">${m.receivedKg ? Math.round((m.catKg[k] || 0) / m.receivedKg * 100) : 0}%</td></tr>`).join('')}
     </table>
     <div style="margin-top:10px"></div>
     <table class="pr-tbl">
@@ -2808,7 +3078,7 @@ function printMonthReport() {
    ------------------------------------------------------------
    Step 01 : Invoice date (aaj) — delivery date tab set hogi
              jab maal wapis deliver hoga.
-   Step 02 : Category tabs (A / B / C) + kitne KG + ITEMS
+   Step 02 : ITEMS + kitne KG (per KG billing, category/pcs nahi)
              (product list se click karke select).
    Slip    : Sale slip par amount nahi hota (sirf KG / items).
    Invoice : Custom invoice print — rate, kg, total, paid, due.
@@ -2836,7 +3106,7 @@ function renderNewSales(param) {
 
   UI.renderLayout('newsales', `<div id="nsBody"></div>`, {
     title: '➕ New Sales — Wash Entry',
-    subtitle: 'Daily clients se kapre receive karein — category wise KG + items select karein'
+    subtitle: 'Daily clients se kapre receive karein — items select karein aur KG likhein'
   });
   nsPaint();
 }
@@ -2845,7 +3115,7 @@ function nsLoadFromSale(saleId) {
   const s = DB.get('sales', saleId);
   if (!s) return;
   NS.customerId = s.customerId;
-  NS.lines = (s.lines || []).map(l => ({ id: uid('ln'), productId: l.productId, category: l.category, kg: round1(l.qtyKg), pcs: num(l.pcs), note: l.note || '' }));
+  NS.lines = (s.lines || []).map(l => ({ id: uid('ln'), productId: l.productId, category: l.category, type: l.type || '', kg: round1(l.qtyKg), pcs: num(l.pcs), note: l.note || '' }));
 }
 
 function nsPaint() {
@@ -2855,7 +3125,6 @@ function nsPaint() {
   const products = DB.all('products').filter(p => p.active !== false);
   const rate = num(NS.rate) || Biz.rate();   // is bill ka rate (purane bill ke liye badla ja sakta hai)
   const totalKg = round1(NS.lines.reduce((a, l) => a + num(l.kg), 0));
-  const totalPcs = NS.lines.reduce((a, l) => a + num(l.pcs), 0);
   const amount = round2(totalKg * rate);
   const cust = NS.customerId ? Biz.customerAccount(NS.customerId) : null;
 
@@ -2892,43 +3161,34 @@ function nsPaint() {
       </div>
     </div>`;
 
-  /* -------- Step 02: category tabs + KG + items -------- */
+  /* -------- Step 02: items + KG (category / pieces nahi) -------- */
   const tabBar = `
     <div class="row mb10" style="gap:6px">
-      ${cats.map(c => `<button class="seg-btn ${NS.tab === c.key ? 'on' : ''}" data-nstab="${c.key}"
-        style="${NS.tab === c.key ? 'background:' + c.color + ';color:#fff;box-shadow:0 6px 16px ' + c.color + '55' : ''}">
-        ${esc(c.label)} <span class="tag" style="background:rgba(255,255,255,.25);color:inherit">${fmtKg(nsCatKg(c.key))}</span></button>`).join('')}
+      <span class="small dim"><b>ITEMS</b> — product par click karein (multiple select kar sakte hain)</span>
       <div class="sp flex1"></div>
       <button class="btn btn-ghost btn-sm" id="nsNewItem">➕ New Item in Product List</button>
     </div>`;
 
-  const activeCat = cats.find(c => c.key === NS.tab) || cats[0];
-  const catProducts = products.filter(p => p.category === activeCat.key);
-  const selected = nsSelectedItems(activeCat.key);
+  const selected = nsSelectedItems();
 
   const catPanel = `
-    <div class="cat-card on" style="--cat-color:${activeCat.color}">
+    <div class="cat-card on" style="--cat-color:#4f7cff">
       <div class="cat-card-head">
-        <span class="cat-dot" style="background:${activeCat.color}"></span>
-        <span class="cat-name">${esc(activeCat.label)} — ${esc(activeCat.desc || '')}</span>
+        <span class="cat-name">🧺 Wash Items</span>
         <span class="tag" style="cursor:pointer" id="nsCatRate" title="Rate edit karein">${fmtMoney(rate)} / kg ✏️</span>
       </div>
-      <div class="small dim mb6"><b>ITEMS</b> — product par click karein (multiple select kar sakte hain):</div>
       <div class="cat-items">
-        ${catProducts.length ? catProducts.map(p => `<button class="item-chip ${selected.indexOf(p.id) >= 0 ? 'on' : ''}" data-nsitem="${p.id}">
-            ${esc(p.name)} <small>${esc(p.inputType || 'kg')}</small></button>`).join('')
-      : '<span class="tiny muted">Is category mein koi product nahi. “➕ New Item” se add karein.</span>'}
+        ${products.length ? products.map(p => `<button class="item-chip ${selected.indexOf(p.id) >= 0 ? 'on' : ''}" data-nsitem="${p.id}">
+            ${esc(p.name)}</button>`).join('')
+      : '<span class="tiny muted">Koi item nahi — “➕ New Item” se add karein.</span>'}
       </div>
-      <div class="grid g3 mt14" style="gap:10px;align-items:end">
-        <label class="fld mb0"><span>Kitne KG? (${esc(activeCat.label)})</span>
+      <div class="grid g2 mt14" style="gap:10px;align-items:end">
+        <label class="fld mb0"><span>Kitne KG? <b class="req">*</b></span>
           <div class="cat-kg-input"><input type="number" step="0.1" min="0" class="inp" id="nsKg" placeholder="0.0"/><span class="cat-unit">KG</span></div>
-        </label>
-        <label class="fld mb0"><span>Pieces (optional)</span>
-          <div class="cat-kg-input"><input type="number" step="1" min="0" class="inp" id="nsPcs" placeholder="0"/><span class="cat-unit">PCS</span></div>
         </label>
         <button class="btn btn-primary btn-block" id="nsAdd" style="height:44px">➕ Add to Slip (Enter)</button>
       </div>
-      <div class="fld-hint">Agar 2 items select hain to yeh KG barabar taqseem ho jayegi (baad mein table se adjust kar sakte hain).</div>
+      <div class="fld-hint">Koi item select na karein to KG “Wash” ke naam par slip mein chali jayegi.</div>
     </div>`;
 
   /* -------- lines table -------- */
@@ -2937,31 +3197,26 @@ function nsPaint() {
       <div class="card-head"><h3>🧾 Slip Items (${NS.lines.length})</h3><div class="sp"></div>
         ${NS.lines.length ? `<button class="btn btn-ghost btn-sm" id="nsClearLines">🗑️ Sab clear</button>` : ''}</div>
       <div class="tbl-wrap">
-        <table class="tbl" style="min-width:640px">
+        <table class="tbl" style="min-width:560px">
           <thead><tr>
-            <th>Item</th><th>Category</th><th class="t-right">KG</th><th class="t-center">Pieces</th>
-            <th>Note</th><th class="t-right">Amount</th><th></th>
+            <th>Item</th><th class="t-right">KG</th><th>Note</th><th class="t-right">Amount</th><th></th>
           </tr></thead>
           <tbody>
             ${NS.lines.length ? NS.lines.map((l, i) => {
     const p = Biz.product(l.productId);
     return `<tr>
-                <td class="t-strong">${esc(p ? p.name : (l.productName || 'Item'))}</td>
-                <td><span class="tag" style="background:${Biz.catColor(l.category)}22;color:${Biz.catColor(l.category)}">${esc(l.category)} Category</span></td>
+                <td class="t-strong">${esc(Biz.lineName(l))}</td>
                 <td class="t-right"><input type="number" step="0.1" min="0" class="inp inp-xs t-right" style="width:84px"
                      value="${l.kg}" data-linekg="${l.id}"/> kg</td>
-                <td class="t-center"><input type="number" step="1" min="0" class="inp inp-xs t-center" style="width:70px"
-                     value="${l.pcs || ''}" data-linepcs="${l.id}"/></td>
                 <td><input class="inp inp-xs" value="${esc(l.note || '')}" placeholder="—" data-linenote="${l.id}"/></td>
                 <td class="t-right t-mono">${fmtNum(round2(num(l.kg) * rate))}</td>
                 <td><button class="icon-btn" style="width:30px;height:30px;font-size:12px" data-linedel="${l.id}">✕</button></td>
               </tr>`;
-  }).join('') : emptyRow(7, 'Abhi koi item add nahi hua — upar category se KG enter karke “Add to Slip” dabayein', '🧺')}
+  }).join('') : emptyRow(5, 'Abhi koi item add nahi hua — item select karke KG enter karein aur “Add to Slip” dabayein', '🧺')}
           </tbody>
           ${NS.lines.length ? `<tfoot><tr>
-            <td colspan="2">TOTAL</td><td class="t-right">${fmtKg(totalKg)}</td>
-            <td class="t-center">${fmtNum(totalPcs)}</td><td></td>
-            <td class="t-right">${fmtMoney(amount)}</td><td></td></tr></tfoot>` : ''}
+            <td>TOTAL</td><td class="t-right">${fmtKg(totalKg)}</td>
+            <td></td><td class="t-right">${fmtMoney(amount)}</td><td></td></tr></tfoot>` : ''}
         </table>
       </div>
     </div>`;
@@ -2971,12 +3226,15 @@ function nsPaint() {
     <div class="kg-total-bar mb14">
       <div class="kt-item"><div class="kt-lbl">Total Clothes Received</div><div class="kt-val">${fmtKg(totalKg)}</div></div>
       <div class="kt-sep"></div>
-      <div class="kt-item"><div class="kt-lbl">Pieces</div><div class="kt-val">${fmtNum(totalPcs)}</div></div>
+      <div class="kt-item"><div class="kt-lbl">Items</div><div class="kt-val">${fmtNum(NS.lines.length)}</div></div>
       <div class="kt-sep"></div>
-      ${cats.map(c => `<div class="kt-item"><div class="kt-lbl">${esc(c.key)} Category</div><div class="kt-val">${fmtKg(nsCatKg(c.key))}</div></div>`).join('<div class="kt-sep"></div>')}
+      <div class="kt-item"><div class="kt-lbl">Rate / KG</div><div class="kt-val">${fmtMoney(rate)}</div></div>
       <div class="kt-sep"></div>
       <div class="kt-item"><div class="kt-lbl">Tentative Amount (internal)</div><div class="kt-val">${fmtMoney(amount)}</div></div>
     </div>`;
+
+  /* -------- Step 03: item types / KG breakup -------- */
+  const step3 = nsStep3HTML();
 
   /* -------- summary panel -------- */
   const summary = `
@@ -2988,7 +3246,6 @@ function nsPaint() {
         <div class="kv"><span>Invoice Date</span><b>${fmtDate(NS.entryDate)}</b></div>
         <div class="kv"><span>Delivery Date</span><b class="t-warn">Pending (baad mein)</b></div>
         <div class="kv"><span>Total KG</span><b>${fmtKg(totalKg)}</b></div>
-        <div class="kv"><span>Total Pieces</span><b>${fmtNum(totalPcs)}</b></div>
         <div class="kv"><span>Is bill ka Rate / kg</span>
           <span class="row" style="gap:6px;justify-content:flex-end">
             <input type="number" step="1" min="1" class="inp inp-xs t-right" style="width:86px" id="nsRateInp" value="${num(rate)}"/>
@@ -3029,12 +3286,13 @@ function nsPaint() {
     <div class="grid g-2-1">
       <div>
         <div class="card mb14"><div class="card-body">
-          <div class="row mb10"><h3 style="font-size:14.5px;font-weight:800">🧺 Step 02 — Category &amp; Items &amp; KG</h3></div>
+          <div class="row mb10"><h3 style="font-size:14.5px;font-weight:800">🧺 Step 02 — Items &amp; KG</h3></div>
           ${tabBar}
           ${catPanel}
         </div></div>
         ${totalBar}
         ${linesTable}
+        ${step3}
       </div>
       <div>${summary}</div>
     </div>`;
@@ -3042,9 +3300,170 @@ function nsPaint() {
   nsBind();
 }
 
+/* ============================================================
+   STEP 03 — ITEM TYPES (jaise Shoes → Junior / Sports / Man / CH)
+   Type ka naam cashier khud likh sakta hai; naya naam product par
+   save ho jata hai, agli dafa khud aa jata hai.
+   ============================================================ */
+const NS_NONE = '__none__';
+function nsKey(l) { return l.productId || NS_NONE; }
+function nsProductName(pid) {
+  if (pid === NS_NONE) return 'Wash (general)';
+  const p = Biz.product(pid);
+  if (p && p.name) return p.name;
+  const l = NS.lines.find(x => nsKey(x) === pid);
+  return (l && l.productName) || 'Item';
+}
+/** is item ke types: product par saved + slip mein use hue */
+function nsTypes(pid) {
+  const out = Biz.productTypes(pid).slice();
+  NS.lines.forEach(l => { if (nsKey(l) === pid && l.type && out.indexOf(l.type) < 0) out.push(l.type); });
+  return out.filter(Boolean);
+}
+function nsTypedLines(pid) { return NS.lines.filter(l => nsKey(l) === pid && !!l.type); }
+function nsBaseLines(pid) { return NS.lines.filter(l => nsKey(l) === pid && !l.type); }
+function nsBaseKgInSlip(pid) { return round1(nsBaseLines(pid).reduce((a, l) => a + num(l.kg), 0)); }
+function nsTypeKgSum(pid) { return round1(nsTypedLines(pid).reduce((a, l) => a + num(l.kg), 0)); }
+function nsSlipKg(pid) { return round1(nsBaseKgInSlip(pid) + nsTypeKgSum(pid)); }
+/** Step 02 ka original KG (types mein baantne se pehle wala) */
+function nsOrigKg(pid) {
+  const rem = round1(num((NS._base || {})[pid]) || 0);
+  return round1(Math.max(rem, nsSlipKg(pid)));
+}
+function nsLeftKg(pid) { return round1(Math.max(0, nsOrigKg(pid) - nsSlipKg(pid))); }
+function nsSlipProductIds() {
+  const ids = [];
+  NS.lines.forEach(l => { const k = nsKey(l); if (ids.indexOf(k) < 0) ids.push(k); });
+  return ids;
+}
+/** type ka naam product par save karein (customize — agli dafa khud aayega) */
+function nsSaveTypeName(pid, name) {
+  if (!name || pid === NS_NONE) return false;
+  return Biz.saveProductType(pid, name);
+}
+/** pehla type banane se pehle item ka original (general) KG yaad rakhein */
+function nsEnsureBaseStored(pid) {
+  NS._base = NS._base || {};
+  const base = nsBaseLines(pid);
+  if (base.length) {
+    const kg = round1(base.reduce((a, l) => a + num(l.kg), 0));
+    NS._base[pid] = round1(num(NS._base[pid]) + kg);
+    NS.lines = NS.lines.filter(l => !(nsKey(l) === pid && !l.type));
+  }
+}
+/** ek type ki KG set karein (row = ek line) */
+function nsSetTypeKg(pid, type, kg) {
+  type = String(type || '').trim();
+  if (!type) return toast('Type ka naam likhein', 'warn');
+  if (kg > 0) nsEnsureBaseStored(pid);
+  let ln = NS.lines.find(l => nsKey(l) === pid && l.type === type);
+  const isNew = !ln;
+  if (!ln) {
+    const p = Biz.product(pid) || {};
+    ln = { id: uid('ln'), productId: pid === NS_NONE ? null : pid, productName: nsProductName(pid), category: p.category || '', type, kg: 0, pcs: 0, note: '' };
+    NS.lines.push(ln);
+  }
+  ln.kg = round1(Math.max(0, kg));
+  if (!ln.kg) NS.lines = NS.lines.filter(l => l !== ln);      // KG khali → line hata dein
+  const saved = nsSaveTypeName(pid, type);
+  nsPaint();
+  if (isNew && saved) toast('“' + type + '” ' + nsProductName(pid) + ' ke types mein save ho gaya ✔', 'success', 2200);
+  else if (isNew) toast('“' + type + '” add ho gaya — KG ' + fmtKg(ln ? ln.kg : kg), 'success', 1800);
+}
+function nsRenameType(pid, oldT, newT) {
+  newT = String(newT || '').trim();
+  if (!newT) { nsPaint(); return; }
+  if (newT === oldT) return;
+  NS.lines.filter(l => nsKey(l) === pid && l.type === oldT).forEach(l => { l.type = newT; });
+  const p = Biz.product(pid);
+  if (p && Array.isArray(p.types)) {
+    const list = p.types.filter(t => t !== oldT);
+    if (list.indexOf(newT) < 0) list.push(newT);
+    DB.upsert('products', Object.assign({}, p, { types: list }), { silent: true });
+    DB.save();
+  } else nsSaveTypeName(pid, newT);
+  nsPaint();
+  toast('Type ka naam badal kar “' + newT + '” kar diya', 'success', 1800);
+}
+function nsRestoreBase(pid) {
+  const rem = round1(num((NS._base || {})[pid]) || 0);
+  if (rem <= 0) return;
+  const need = round1(rem - nsBaseKgInSlip(pid));
+  if (need > 0.05) {
+    const p = Biz.product(pid) || {};
+    NS.lines.push({ id: uid('ln'), productId: pid === NS_NONE ? null : pid, productName: nsProductName(pid), category: p.category || '', type: '', kg: need, pcs: 0, note: '' });
+  }
+}
+function nsDeleteType(pid, type) {
+  NS.lines = NS.lines.filter(l => !(nsKey(l) === pid && l.type === type));
+  if (!nsTypedLines(pid).length) nsRestoreBase(pid);      // saare types hat gaye → original KG wapis
+  nsPaint();
+  toast('“' + type + '” hata diya', 'info', 1600);
+}
+function nsAddLeftover(pid) {
+  const left = nsLeftKg(pid);
+  if (left <= 0) return toast('Koi baaki KG nahi — sab types mein baant di gayi hai ✔', 'info', 1800);
+  const p = Biz.product(pid) || {};
+  NS.lines.push({ id: uid('ln'), productId: pid === NS_NONE ? null : pid, productName: nsProductName(pid), category: p.category || '', type: '', kg: left, pcs: 0, note: '' });
+  nsPaint();
+  toast(fmtKg(left) + ' “' + nsProductName(pid) + '” (general) mein daal di gayi', 'success', 2200);
+}
+
+/** Step 03 ka poora panel */
+function nsStep3HTML() {
+  if (!NS.lines.length) return '';
+  const blocks = nsSlipProductIds().map(pid => {
+    const name = nsProductName(pid);
+    const types = nsTypes(pid);
+    const typed = nsTypedLines(pid);
+    const typeKg = nsTypeKgSum(pid);
+    const origKg = nsOrigKg(pid);
+    const left = nsLeftKg(pid);
+    const rowsHtml = types.length ? types.map(t => {
+      const ln = typed.find(l => l.type === t);
+      return `<div class="row mb6" style="gap:8px;align-items:center">
+        <input class="inp inp-xs" style="flex:1;min-width:130px" value="${esc(t)}" data-tname="${esc(t)}" data-tp="${esc(pid)}" title="Naam badalne ke liye likhein — item ke sath save ho jayega"/>
+        <input type="number" step="0.1" min="0" class="inp inp-xs t-right" style="width:96px" value="${ln ? ln.kg : ''}" placeholder="0.0" data-tkg="${esc(t)}" data-tp="${esc(pid)}"/>
+        <span class="tiny muted" style="width:22px">kg</span>
+        ${ln ? `<button class="icon-btn" style="width:28px;height:28px;font-size:11px" data-tdel="${esc(t)}" data-tp="${esc(pid)}" title="Hata dein">✕</button>` : '<span style="width:28px"></span>'}
+      </div>`;
+    }).join('') : '<div class="tiny muted mb6">Abhi koi type nahi — neeche naya type likh kar KG daalein (jaise Junior Shoes).</div>';
+    return `
+      <div class="card card-flat mb10" data-tblock="${esc(pid)}">
+        <div class="card-head" style="gap:8px;flex-wrap:wrap">
+          <h3 style="font-size:13.5px">🧩 ${esc(name)}</h3>
+          <div class="sp"></div>
+          <span class="pill pill-info">Slip: ${fmtKg(nsSlipKg(pid))}</span>
+          <span class="pill ${typeKg > 0 ? 'pill-ok' : 'pill-muted'}">Types: ${fmtKg(typeKg)}</span>
+          ${left > 0.05 ? `<span class="pill pill-warn">Baaki: ${fmtKg(left)}</span>` : ''}
+        </div>
+        <div class="card-body" style="padding-top:8px">
+          ${rowsHtml}
+          <div class="row" style="gap:8px;align-items:center;margin-top:6px">
+            <input class="inp inp-xs" style="flex:1;min-width:130px" id="nsNewTypeName_${esc(pid)}" placeholder="➕ Naya type ka naam (jaise Junior Shoes)"/>
+            <input type="number" step="0.1" min="0" class="inp inp-xs t-right" style="width:96px" id="nsNewTypeKg_${esc(pid)}" placeholder="0.0"/>
+            <span class="tiny muted" style="width:22px">kg</span>
+            <button class="btn btn-ghost btn-xs" data-tadd="${esc(pid)}">➕ Add</button>
+          </div>
+          ${left > 0.05 ? `<button class="btn btn-ghost btn-xs mt6" data-tleft="${esc(pid)}">⬅️ Baaki ${fmtKg(left)} type ke bina (“${esc(name)}” general) daal dein</button>` : ''}
+          <div class="fld-hint">Type ka naam + KG likh kar Enter/Add dabayein → slip mein <b>${esc(name)} — (type)</b> ban jata hai. Naya naam item ke sath <b>save</b> hota hai, agli dafa khud nazar aayega (naam badalna ho to likh kar bahar click karein).</div>
+        </div>
+      </div>`;
+  }).join('');
+  return `
+    <div class="card mb14">
+      <div class="card-head" style="gap:8px;flex-wrap:wrap">
+        <h3 style="font-size:14.5px;font-weight:800">🧩 Step 03 — Types / KG Breakup</h3>
+        <span class="tiny muted">optional — item ko chhote types mein baant dein (jaise Shoes → Junior / Sports / Man / CH)</span>
+      </div>
+      <div class="card-body">${blocks}</div>
+    </div>`;
+}
+
 /* ---------- helpers ---------- */
 function nsCatKg(cat) { return round1(NS.lines.filter(l => l.category === cat).reduce((a, l) => a + num(l.kg), 0)); }
-function nsSelectedItems(cat) { return NS._sel && NS._sel[cat] ? NS._sel[cat] : (NS._sel = NS._sel || {}, NS._sel[cat] = NS._sel[cat] || []); }
+/* items selection — ek hi list (category nahi) */
+function nsSelectedItems() { return NS._sel && NS._sel.all ? NS._sel.all : (NS._sel = NS._sel || {}, NS._sel.all = NS._sel.all || []); }
 
 function nsBind() {
   const el = $('#nsBody');
@@ -3059,12 +3478,9 @@ function nsBind() {
   const ad = $('#nsAdvance'); if (ad) ad.oninput = e => { NS.advance = e.target.value; };
   const md = $('#nsMode'); if (md) md.onchange = e => { NS.paymentMode = e.target.value; };
 
-  /* category tabs */
-  $$('[data-nstab]', el).forEach(b => b.onclick = () => { NS.tab = b.dataset.nstab; nsPaint(); });
-
   /* item chips */
   $$('[data-nsitem]', el).forEach(b => b.onclick = () => {
-    const cat = NS.tab, list = nsSelectedItems(cat), id = b.dataset.nsitem;
+    const list = nsSelectedItems(), id = b.dataset.nsitem;
     const i = list.indexOf(id);
     if (i >= 0) list.splice(i, 1); else list.push(id);
     b.classList.toggle('on');
@@ -3072,7 +3488,7 @@ function nsBind() {
 
   /* add to slip */
   const add = $('#nsAdd');
-  const kgIn = $('#nsKg'), pcsIn = $('#nsPcs');
+  const kgIn = $('#nsKg');
   if (kgIn) {
     kgIn.focus();
     kgIn.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); nsAddLine(); } };
@@ -3082,7 +3498,7 @@ function nsBind() {
   /* new item in product list */
   const ni = $('#nsNewItem');
   if (ni) ni.onclick = async () => {
-    const p = await productForm(null, NS.tab);
+    const p = await productForm(null);
     if (p) { toast('Item add ho gaya — ab click karke select karein', 'success'); nsPaint(); }
   };
 
@@ -3091,10 +3507,6 @@ function nsBind() {
     const l = NS.lines.find(x => x.id === e.target.dataset.linekg);
     if (l) { l.kg = round1(e.target.value); nsPaint(); }
   });
-  $$('[data-linepcs]', el).forEach(i => i.onchange = e => {
-    const l = NS.lines.find(x => x.id === e.target.dataset.linepcs);
-    if (l) { l.pcs = num(e.target.value); nsPaint(); }
-  });
   $$('[data-linenote]', el).forEach(i => i.oninput = e => {
     const l = NS.lines.find(x => x.id === e.target.dataset.linenote);
     if (l) l.note = e.target.value;
@@ -3102,8 +3514,38 @@ function nsBind() {
   $$('[data-linedel]', el).forEach(b => b.onclick = () => {
     NS.lines = NS.lines.filter(l => l.id !== b.dataset.linedel); nsPaint();
   });
+  /* ---- STEP 03 bindings ---- */
+  $$('[data-tkg]', el).forEach(inp => {
+    inp.onchange = e => {
+      const pid = e.target.dataset.tp, t = e.target.dataset.tkg;
+      nsSetTypeKg(pid, t, round1(e.target.value));
+    };
+    inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } };
+  });
+  $$('[data-tname]', el).forEach(inp => {
+    inp.onchange = e => nsRenameType(e.target.dataset.tp, e.target.dataset.tname, e.target.value);
+    inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } };
+  });
+  $$('[data-tdel]', el).forEach(b => b.onclick = () => nsDeleteType(b.dataset.tp, b.dataset.tdel));
+  $$('[data-tleft]', el).forEach(b => b.onclick = () => nsAddLeftover(b.dataset.tleft));
+  $$('[data-tadd]', el).forEach(b => {
+    const addType = () => {
+      const pid = b.dataset.tadd;
+      const nEl = $('#nsNewTypeName_' + pid), kEl = $('#nsNewTypeKg_' + pid);
+      const name = (nEl && nEl.value || '').trim();
+      const kg = round1(kEl && kEl.value || 0);
+      if (!name) { toast('Type ka naam likhein (jaise Junior Shoes)', 'warn'); if (nEl) nEl.focus(); return; }
+      nsSetTypeKg(pid, name, kg);
+    };
+    b.onclick = addType;
+    const nEl = $('#nsNewTypeName_' + b.dataset.tadd);
+    const kEl = $('#nsNewTypeKg_' + b.dataset.tadd);
+    if (nEl) nEl.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); if (kEl) kEl.focus(); } };
+    if (kEl) kEl.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addType(); } };
+  });
+
   const cl = $('#nsClearLines'); if (cl) cl.onclick = async () => {
-    if (await confirmDialog('Saare items hata dein?', { title: 'Clear items', danger: true })) { NS.lines = []; nsPaint(); }
+    if (await confirmDialog('Saare items hata dein?', { title: 'Clear items', danger: true })) { NS.lines = []; NS._base = {}; nsPaint(); }
   };
 
   const nr = $('#nsRateEdit'); if (nr) nr.onclick = () => openRateForm();
@@ -3128,35 +3570,34 @@ function nsBind() {
   const so = $('#nsSaveOnly'); if (so) so.onclick = () => nsSave('only');
   const rs = $('#nsReset'); if (rs) rs.onclick = async () => {
     if (await confirmDialog('Form reset karein?', { title: 'Reset' })) {
-      NS.lines = []; NS._sel = {}; NS.advance = ''; NS.note = ''; NS.customerId = ''; NS.tab = 'A'; nsPaint();
+      NS.lines = []; NS._sel = {}; NS._base = {}; NS.advance = ''; NS.note = ''; NS.customerId = ''; NS.tab = 'A'; nsPaint();
     }
   };
 }
 
 function nsAddLine() {
-  const kgIn = $('#nsKg'), pcsIn = $('#nsPcs');
+  const kgIn = $('#nsKg');
   const kg = round1(kgIn ? kgIn.value : 0);
   if (kg <= 0) { toast('Pehle KG enter karein', 'warn'); if (kgIn) kgIn.focus(); return; }
-  const cat = NS.tab;
-  const sel = nsSelectedItems(cat).slice();
-  const pcs = num(pcsIn ? pcsIn.value : 0);
-  const products = DB.all('products').filter(p => p.category === cat && p.active !== false);
+  const sel = nsSelectedItems().slice();
+  const products = DB.all('products').filter(p => p.active !== false);
 
   if (!sel.length) {
-    // generic line for this category
-    NS.lines.push({ id: uid('ln'), productId: products[0] ? products[0].id : null, productName: 'Wash (' + cat + ' Category)', category: cat, kg, pcs, note: '' });
+    NS.lines.push({ id: uid('ln'), productId: null, productName: 'Wash', category: '', type: NS._type ? '' : '', kg, pcs: 0, note: '' });
   } else {
     const each = round1(Math.floor((kg / sel.length) * 10) / 10);
     let used = 0;
     sel.forEach((pid, i) => {
       const lkg = (i === sel.length - 1) ? round1(kg - used) : each;
       used = round1(used + lkg);
-      NS.lines.push({ id: uid('ln'), productId: pid, category: cat, kg: lkg, pcs: i === 0 ? pcs : 0, note: '' });
+      const pd = products.find(p => p.id === pid) || Biz.product(pid) || {};
+      NS.lines.push({ id: uid('ln'), productId: pid, category: pd.category || '', type: '', kg: lkg, pcs: 0, note: '' });
     });
   }
-  nsSelectedItems(cat).length = 0;
+  nsSelectedItems().length = 0;
+  if (kgIn) kgIn.value = '';
   nsPaint();
-  toast(fmtKg(kg) + ' ' + cat + ' Category mein add ho gaya', 'success', 1600);
+  toast(fmtKg(kg) + ' slip mein add ho gaya', 'success', 1600);
 }
 
 async function nsSave(mode) {
@@ -3164,7 +3605,6 @@ async function nsSave(mode) {
   if (!NS.lines.length) return toast('Kam az kam ek item / KG add karein', 'error');
   const rate = num(NS.rate) || Biz.rate();   // is bill ka rate
   const kgTotal = round1(NS.lines.reduce((a, l) => a + num(l.kg), 0));
-  const pieces = NS.lines.reduce((a, l) => a + num(l.pcs), 0);
   const sale = {
     id: uid('sal'),
     invoiceNo: DB.nextNumber('invoice'),
@@ -3174,9 +3614,9 @@ async function nsSave(mode) {
     expectedDelivery: NS.expected || '',
     deliveryDate: '',
     status: 'open',
-    lines: NS.lines.map(l => ({ id: l.id, productId: l.productId, productName: (Biz.product(l.productId) || {}).name || l.productName || 'Item', category: l.category, qtyKg: round1(l.kg), pcs: num(l.pcs), note: l.note || '' })),
+    lines: NS.lines.map(l => ({ id: l.id, productId: l.productId, productName: (Biz.product(l.productId) || {}).name || l.productName || 'Item', category: l.category || '', type: l.type || '', qtyKg: round1(l.kg), pcs: 0, note: l.note || '' })),
     kgTotal,
-    piecesTotal: pieces,
+    piecesTotal: 0,
     rate,
     amount: round2(kgTotal * rate),
     paymentMode: NS.paymentMode || 'Credit',
@@ -3195,7 +3635,7 @@ async function nsSave(mode) {
   toast('✔ ' + sale.invoiceNo + ' save ho gaya — ' + fmtKg(kgTotal), 'success');
 
   // reset cart but keep customer for fast repeat entry
-  NS.lines = []; NS._sel = {}; NS.advance = ''; NS.note = '';
+  NS.lines = []; NS._sel = {}; NS._base = {}; NS.advance = ''; NS.note = '';
   NS.rate = '';   // rate override sirf usi bill ke liye tha
 
   if (mode === 'slip') {
@@ -3313,7 +3753,7 @@ function salesPaint() {
         <table class="tbl" style="min-width:1080px">
           <thead><tr>
             <th>Invoice</th><th>Customer</th><th>Invoice Date</th><th>Delivery Date</th>
-            <th>Items</th><th class="t-right">KG (A/B/C)</th><th class="t-center">Status</th>
+            <th>Items</th><th class="t-right">KG</th><th class="t-center">Status</th>
             <th class="t-right">Amount</th><th class="t-right">Due</th><th class="t-center">Actions</th>
           </tr></thead>
           <tbody>
@@ -3325,8 +3765,7 @@ function salesPaint() {
               <td class="t-nowrap">${fmtDate(s.entryDate)}</td>
               <td class="t-nowrap">${s.deliveryDate ? '<span class="t-ok">' + fmtDate(s.deliveryDate) + '</span>' : '<span class="t-warn tiny">pending</span>'}</td>
               <td class="tiny">${esc(Biz.saleItemsSummary(s))}</td>
-              <td class="t-right t-nowrap"><b>${fmtKg(s.kgTotal)}</b><div class="tiny muted">
-                ${Biz.catKeys().map(k => esc(k) + ' ' + fmtNum(Biz.saleCatKg(s, k), 1)).join(' / ')}</div></td>
+              <td class="t-right t-nowrap"><b>${fmtKg(s.kgTotal)}</b></td>
               <td class="t-center">${UI.statusPill(s.status)}</td>
               <td class="t-right t-nowrap">${fmtMoney(Biz.saleAmount(s))}</td>
               <td class="t-right t-nowrap">${due > 0.009 ? '<b class="t-bad">' + fmtMoney(due) + '</b>' : '<span class="t-ok tiny">paid</span>'}</td>
@@ -3360,10 +3799,9 @@ function salesPaint() {
   const so = $('#sSort'); if (so) so.onchange = e => { SalesUI.sort = e.target.value; salesPaint(); };
   $('#sNew').onclick = () => app.go('newsales');
   $('#sExport').onclick = () => exportCSV('sales-' + Period.shortLabel().replace(/\s/g, '') + '.csv',
-    ['Invoice', 'Customer', 'Invoice Date', 'Delivery Date', 'Items', 'KG', 'A', 'B', 'C', 'Pieces', 'Rate', 'Amount', 'Status'],
+    ['Invoice', 'Customer', 'Invoice Date', 'Delivery Date', 'Items', 'KG', 'Rate', 'Amount', 'Status'],
     rows.map(s => [s.invoiceNo, Biz.customerName(s.customerId), s.entryDate, s.deliveryDate || '',
-    Biz.saleItemsSummary(s), s.kgTotal, Biz.saleCatKg(s, 'A'), Biz.saleCatKg(s, 'B'), Biz.saleCatKg(s, 'C'),
-    s.piecesTotal, Biz.saleRate(s), Biz.saleAmount(s), s.status]));
+    Biz.saleItemsSummary(s), s.kgTotal, Biz.saleRate(s), Biz.saleAmount(s), s.status]));
 
   $$('[data-pg]', el).forEach(b => b.onclick = () => { SalesUI.page = +b.dataset.pg; salesPaint(); });
   $$('[data-view]', el).forEach(b => b.onclick = e => { e.stopPropagation(); openSaleDetail(b.dataset.view); });
@@ -3415,8 +3853,6 @@ function openSaleDetail(id, opts) {
 
       <div class="card card-flat"><div class="card-body">
         <div class="kv"><span>Total KG</span><b>${fmtKg(s.kgTotal)}</b></div>
-        ${Biz.catKeys().map(k => `<div class="kv"><span>${esc(Biz.catLabel(k))}</span><b>${fmtKg(Biz.saleCatKg(s, k))}</b></div>`).join('')}
-        <div class="kv"><span>Pieces</span><b>${fmtNum(s.piecesTotal)}</b></div>
         <div class="kv"><span>Rate</span><b>${fmtMoney(Biz.saleRate(s))} / kg</b></div>
         <div class="kv total"><span>Invoice Amount</span><b>${fmtMoney(me._amount)}</b></div>
         <div class="kv"><span>Received against this bill</span><b class="t-ok">${fmtMoney(me._applied)}</b></div>
@@ -3427,11 +3863,10 @@ function openSaleDetail(id, opts) {
 
     <div class="card card-flat mt14"><div class="card-head"><h3>🧺 Items</h3></div>
       <div class="tbl-wrap"><table class="tbl" style="min-width:520px">
-        <thead><tr><th>#</th><th>Item</th><th>Category</th><th class="t-right">KG</th><th class="t-center">Pieces</th><th class="t-right">Amount</th></tr></thead>
+        <thead><tr><th>#</th><th>Item</th><th class="t-right">KG</th><th class="t-right">Amount</th></tr></thead>
         <tbody>${(s.lines || []).map((l, i) => `<tr>
-          <td>${i + 1}</td><td class="t-strong">${esc((Biz.product(l.productId) || {}).name || l.productName || 'Item')}</td>
-          <td><span class="tag" style="background:${Biz.catColor(l.category)}22;color:${Biz.catColor(l.category)}">${esc(l.category)}</span></td>
-          <td class="t-right">${fmtKg(l.qtyKg)}</td><td class="t-center">${fmtNum(l.pcs)}</td>
+          <td>${i + 1}</td><td class="t-strong">${esc(Biz.lineName(l))}</td>
+          <td class="t-right">${fmtKg(l.qtyKg)}</td>
           <td class="t-right">${fmtMoney(round2(num(l.qtyKg) * Biz.saleRate(s)))}</td></tr>`).join('')}</tbody>
       </table></div></div>
 
@@ -3507,9 +3942,10 @@ function editSaleForm(id) {
     <div class="card card-flat"><div class="card-head"><h3>Items / KG</h3><div class="sp"></div>
       <button class="btn btn-ghost btn-sm" id="edAddLine">➕ Add row</button></div>
       <div class="tbl-wrap"><table class="tbl" style="min-width:560px">
-        <thead><tr><th>Item</th><th>Category</th><th class="t-right">KG</th><th class="t-center">Pcs</th><th></th></tr></thead>
+        <thead><tr><th>Item</th><th>Type</th><th class="t-right">KG</th><th></th></tr></thead>
         <tbody id="edLines"></tbody></table></div></div>
-    <label class="fld mt10"><span>Note</span><textarea class="inp" id="edNote">${esc(s.note || '')}</textarea></label>`;
+    <label class="fld mt10"><span>Note</span><textarea class="inp" id="edNote">${esc(s.note || '')}</textarea></label>
+    <datalist id="edTypeList"></datalist>`;
 
   const w = openModal({
     title: '✏️ Edit ' + s.invoiceNo, size: 'lg', body,
@@ -3523,30 +3959,34 @@ function editSaleForm(id) {
       <td><select class="inp inp-xs edProd">
         ${prods.map(p => `<option value="${p.id}" ${p.id === l.productId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
         <option value="" ${!l.productId ? 'selected' : ''}>— other —</option></select></td>
-      <td><select class="inp inp-xs edCat">${cats.map(c => `<option ${c.key === l.category ? 'selected' : ''}>${c.key}</option>`).join('')}</select></td>
+      <td><input class="inp inp-xs edType" style="width:130px" list="edTypeList" value="${esc(l.type || '')}" placeholder="type (optional)" title="Jaise Junior Shoes"/></td>
       <td class="t-right"><input type="number" step="0.1" class="inp inp-xs edKg t-right" style="width:80px" value="${l.qtyKg}"/></td>
-      <td class="t-center"><input type="number" step="1" class="inp inp-xs edPcs t-center" style="width:64px" value="${num(l.pcs) || ''}"/></td>
       <td><button class="icon-btn" style="width:28px;height:28px;font-size:11px" data-rml>✕</button></td>`;
     tr.querySelector('[data-rml]').onclick = () => tr.remove();
-    tr.querySelector('.edProd').onchange = e => {
-      const p = Biz.product(e.target.value);
-      if (p) { tr.querySelector('.edCat').value = p.category; }
-    };
     return tr;
   }
   const tbody = $('#edLines', w);
   (s.lines || []).forEach(l => tbody.appendChild(lineRow(l)));
-  $('#edAddLine', w).onclick = () => tbody.appendChild(lineRow({ productId: prods[0] ? prods[0].id : '', category: 'A', qtyKg: 0, pcs: 0 }));
+  /* item ke pehle se saved types (Step 03) suggest karne ke liye */
+  const dlEd = $('#edTypeList', w);
+  if (dlEd) {
+    const seen = [];
+    prods.forEach(p => (p.types || []).forEach(t => { if (t && seen.indexOf(t) < 0) seen.push(t); }));
+    (s.lines || []).forEach(l => { if (l.type && seen.indexOf(l.type) < 0) seen.push(l.type); });
+    dlEd.innerHTML = seen.map(t => '<option value="' + esc(t) + '"></option>').join('');
+  }
+  $('#edAddLine', w).onclick = () => tbody.appendChild(lineRow({ productId: prods[0] ? prods[0].id : '', category: '', type: '', qtyKg: 0, pcs: 0 }));
 
   $('#edSave', w).onclick = () => {
     const lines = $$('tr', tbody).map(tr => {
       const pid = tr.querySelector('.edProd').value;
-      const cat = tr.querySelector('.edCat').value;
       const kg = round1(tr.querySelector('.edKg').value);
-      const pcs = num(tr.querySelector('.edPcs').value);
-      return { id: uid('ln'), productId: pid || null, productName: (Biz.product(pid) || {}).name || 'Item', category: cat, qtyKg: kg, pcs, note: '' };
-    }).filter(l => l.qtyKg > 0 || l.pcs > 0);
+      const tyEl = tr.querySelector('.edType');
+      return { id: uid('ln'), productId: pid || null, productName: (Biz.product(pid) || {}).name || 'Item', category: (Biz.product(pid) || {}).category || '', type: (tyEl ? tyEl.value.trim() : ''), qtyKg: kg, pcs: 0, note: '' };
+    }).filter(l => l.qtyKg > 0);
     if (!lines.length) return toast('Kam az kam ek item rakhein', 'error');
+    /* Step 03: edit mein likhe naye type naam item par yaad rakhein */
+    lines.forEach(l => { if (l.type && l.productId) Biz.saveProductType(l.productId, l.type); });
     const rate = num($('#edRate', w).value) || Biz.rate();
     const kgTotal = round1(lines.reduce((a, l) => a + l.qtyKg, 0));
     const deliveryDate = $('#edDelivery', w).value || '';
@@ -3558,8 +3998,8 @@ function editSaleForm(id) {
       deliveryDate,
       status: deliveryDate ? 'delivered' : 'open',
       deliveredKg: deliveryDate ? kgTotal : 0,
-      deliveredPcs: deliveryDate ? lines.reduce((a, l) => a + l.pcs, 0) : 0,
-      lines, kgTotal, piecesTotal: lines.reduce((a, l) => a + l.pcs, 0),
+      deliveredPcs: 0,
+      lines, kgTotal, piecesTotal: 0,
       rate, amount: round2(kgTotal * rate), amountManual: null, note: $('#edNote', w).value || ''
     }));
     DB.audit('sale-edit', 'Invoice ' + s.invoiceNo + ' edit hui');
@@ -3588,8 +4028,7 @@ function openDeliveryForm(saleId) {
         <input type="number" step="0.1" class="inp" id="dvKg" value="${pendKg}"/>
         <div class="fld-hint">Poora maal deliver ho raha ho to wahi rakhein. Aadha bhi ho sakta hai.</div></label>
     </div>
-    <div class="grid g3">
-      <label class="fld"><span>Pieces</span><input type="number" step="1" class="inp" id="dvPcs" value="${num(s.piecesTotal) - num(s.deliveredPcs || 0)}"/></label>
+    <div class="grid g2">
       <label class="fld"><span>Receiver ka naam</span><input class="inp" id="dvRecv" placeholder="e.g. Ahmed"/></label>
       <label class="fld"><span>Vehicle / Rider</span><input class="inp" id="dvRider" placeholder="optional"/></label>
     </div>
@@ -3608,11 +4047,11 @@ function openDeliveryForm(saleId) {
     const date = $('#dvDate', w).value || todayISO();
     const prevDel = num(s.deliveredKg);
     const newDel = round1(prevDel + kg);
-    const newPcs = num(s.deliveredPcs) + num($('#dvPcs', w).value);
+    const newPcs = 0;
     const full = newDel >= round1(num(s.kgTotal)) - 0.05;
     const rec = {
       id: uid('dlv'), saleId: s.id, invoiceNo: s.invoiceNo, customerId: s.customerId, date,
-      kg, pcs: num($('#dvPcs', w).value), receiver: $('#dvRecv', w).value || '', rider: $('#dvRider', w).value || '',
+      kg, pcs: 0, receiver: $('#dvRecv', w).value || '', rider: $('#dvRider', w).value || '',
       note: $('#dvNote', w).value || '', by: (DB.currentUser() || {}).name || '', createdAt: new Date().toISOString()
     };
     DB.upsert('deliveries', rec, { silent: true });
@@ -3640,21 +4079,18 @@ function printSaleSlip(saleId, size) {
   const p = paperProfile();
   const paper = size || printSizeFor('slip');
   const is58 = (paper === 'thermal58');
-  const acc = Biz.customerAccount(s.customerId);
 
   const lineRows = (s.lines || []).map((l, i) => {
     const pr = Biz.product(l.productId);
-    return { i: i + 1, name: (pr ? pr.name : l.productName) || 'Item', cat: l.category, kg: num(l.qtyKg), pcs: num(l.pcs), note: l.note || '' };
+    return { i: i + 1, name: Biz.lineName(l), kg: num(l.qtyKg), note: l.note || '' };
   });
-  /* ek hi item + category ko merge kar dein (slip chhoti rehti hai) */
+  /* ek hi item ko merge kar dein (slip chhoti rehti hai) */
   const merged = [];
   lineRows.forEach(r => {
-    const f = merged.find(m => m.name === r.name && m.cat === r.cat);
-    if (f) { f.kg = round1(f.kg + r.kg); f.pcs += r.pcs; } else merged.push(Object.assign({}, r));
+    const f = merged.find(m => m.name === r.name);
+    if (f) { f.kg = round1(f.kg + r.kg); } else merged.push(Object.assign({}, r));
   });
   const totalKg = round1(merged.reduce((a, r) => a + r.kg, 0));
-  const totalPcs = merged.reduce((a, r) => a + r.pcs, 0);
-  const catLines = Biz.catKeys().map(k => ({ k, kg: Biz.saleCatKg(s, k) })).filter(c => c.kg > 0);
 
   const title = shortDocTitle('WASH RECEIVING SLIP (SALE SLIP)', is58 ? 'thermal58' : 'thermal80');
 
@@ -3669,17 +4105,14 @@ function printSaleSlip(saleId, size) {
       <div class="tk"><span>Delivery Date:</span><b class="tk-b">${s.deliveryDate ? fmtDate(s.deliveryDate) : '____________'}</b></div>
     </div>
     <table class="pr-tbl">
-      <thead><tr><th style="width:${is58 ? '12%' : '8%'}">#</th><th>ITEM</th><th class="c" style="width:${is58 ? '20%' : '18%'}">CAT</th><th class="r" style="width:${is58 ? '18%' : '16%'}">KG</th><th class="r" style="width:${is58 ? '16%' : '14%'}">PCS</th></tr></thead>
+      <thead><tr><th style="width:${is58 ? '14%' : '10%'}">#</th><th>ITEM</th><th class="r" style="width:${is58 ? '28%' : '26%'}">KG</th></tr></thead>
       <tbody>
         ${merged.map(r => `<tr><td>${r.i}</td><td>${esc(r.name)}${r.note ? '<br><span class="small">' + esc(r.note) + '</span>' : ''}</td>
-          <td class="c">${esc(r.cat)}</td><td class="r">${fmtNum(r.kg, r.kg % 1 ? 1 : 0)}</td><td class="r">${r.pcs ? fmtNum(r.pcs) : '—'}</td></tr>`).join('')}
+          <td class="r">${fmtNum(r.kg, r.kg % 1 ? 1 : 0)}</td></tr>`).join('')}
       </tbody>
     </table>
     <table class="pr-tot">
       <tr class="grand"><td>TOTAL RECEIVED</td><td class="r">${fmtKg(totalKg)}</td></tr>
-      <tr><td>Total Pieces</td><td class="r"><b>${fmtNum(totalPcs)}</b></td></tr>
-      ${catLines.map(c => `<tr><td>&nbsp;&nbsp;— ${esc(c.k)} Category</td><td class="r">${fmtKg(c.kg)}</td></tr>`).join('')}
-      <tr><td>Delivery Pending</td><td class="r"><b>${fmtKg(acc.kgInFactory)}</b></td></tr>
     </table>
     <div class="pr-foot">
       <div class="small">Received by: ${esc(s.createdBy || '')} &middot; ${new Date().toLocaleString()}</div>
@@ -3789,8 +4222,6 @@ function printCustomInvoice(saleId, cfg) {
   const settledKg = round1((paidNow + Math.min(advHeld, grossPayable)) / rate);
   const balanceKg = round1(Math.max(0, kg + otherKg - settledKg));
 
-  /* kg breakdown per category for the bill */
-  const cats = Biz.catKeys().map(k => ({ k, kg: Biz.saleCatKg(s, k) })).filter(x => x.kg > 0);
   const cust = DB.get('customers', s.customerId) || {};
 
   const statement = `
@@ -3818,20 +4249,19 @@ function printCustomInvoice(saleId, cfg) {
       </div>
     </div>
     <table class="pr-tbl">
-      <thead><tr><th style="width:24px">#</th><th>Description</th><th class="c" style="width:60px">Category</th>
-        <th class="r" style="width:60px">Qty (KG)</th><th class="r" style="width:74px">Rate</th><th class="r" style="width:86px">Amount</th></tr></thead>
+      <thead><tr><th style="width:24px">#</th><th>Description</th>
+        <th class="r" style="width:70px">Qty (KG)</th><th class="r" style="width:80px">Rate</th><th class="r" style="width:92px">Amount</th></tr></thead>
       <tbody>
         ${(s.lines || []).map((l, i) => {
     const p = Biz.product(l.productId);
-    return `<tr><td>${i + 1}</td><td>${esc((p ? p.name : l.productName) || 'Wash')}<br><span class="small">${num(l.pcs) ? l.pcs + ' pcs' : ''}${l.note ? ' · ' + esc(l.note) : ''}</span></td>
-          <td class="c">${esc(l.category || '')}</td><td class="r">${fmtNum(l.qtyKg, 1)}</td><td class="r">${fmtNum(rate)}</td>
+    return `<tr><td>${i + 1}</td><td>${esc(Biz.lineName(l))}${l.note ? '<br><span class="small">' + esc(l.note) + '</span>' : ''}</td>
+          <td class="r">${fmtNum(l.qtyKg, 1)}</td><td class="r">${fmtNum(rate)}</td>
           <td class="r">${fmtNum(round2(num(l.qtyKg) * rate))}</td></tr>`;
   }).join('')}
       </tbody>
     </table>
     <table class="pr-tot">
       <tr><td>Total Weight (billed)</td><td class="r"><b>${fmtKg(kg)}</b></td></tr>
-      ${cats.map(x => `<tr><td style="padding-left:18px" class="small">— ${esc(Biz.catLabel(x.k))}</td><td class="r small">${fmtKg(x.kg)}</td></tr>`).join('')}
       <tr><td>Wash Charges @ ${fmtMoney(rate)} / KG</td><td class="r">${fmtMoney(round2(kg * rate))}</td></tr>
       ${disc > 0 ? `<tr><td>Discount</td><td class="r">− ${fmtMoney(disc)}</td></tr>` : ''}
       <tr><td><b>This Invoice Amount</b></td><td class="r"><b>${fmtMoney(amount)}</b></td></tr>
@@ -3870,9 +4300,9 @@ function printDeliverySlip(saleId) {
         Delivery Date: <b>${fmtDate(s.deliveryDate || todayISO())}</b></div>
     </div>
     <table class="pr-tbl">
-      <thead><tr><th>Item</th><th class="c">Category</th><th class="r">KG</th><th class="r">Pcs</th></tr></thead>
-      <tbody>${(s.lines || []).map(l => `<tr><td>${esc((Biz.product(l.productId) || {}).name || l.productName || 'Item')}</td>
-        <td class="c">${esc(l.category)}</td><td class="r">${fmtNum(l.qtyKg, 1)}</td><td class="r">${fmtNum(l.pcs)}</td></tr>`).join('')}</tbody>
+      <thead><tr><th>Item</th><th class="r">KG</th></tr></thead>
+      <tbody>${(s.lines || []).map(l => `<tr><td>${esc(Biz.lineName(l))}</td>
+        <td class="r">${fmtNum(l.qtyKg, 1)}</td></tr>`).join('')}</tbody>
     </table>
     <table class="pr-tot">
       <tr><td>Total KG Received</td><td class="r"><b>${fmtKg(s.kgTotal)}</b></td></tr>
@@ -3915,13 +4345,12 @@ function deliveryPaint() {
   if (!el) return;
   const pend = Biz.pendingWithAge();
   const totalKg = round1(pend.reduce((a, s) => a + Biz.pendingKg(s), 0));
-  const totalPcs = pend.reduce((a, s) => a + (num(s.piecesTotal) - num(s.deliveredPcs)), 0);
   const old = pend.filter(s => s.ageDays > 7);
 
   el.innerHTML = `
     <div class="stats">
       ${UI.statCard({ icon: '🏭', label: 'Open Orders', value: fmtNum(pend.length), tone: 'info' })}
-      ${UI.statCard({ icon: '⚖️', label: 'Clothes in Factory', value: fmtKg(totalKg), tone: 'warn', foot: fmtNum(totalPcs) + ' pcs' })}
+      ${UI.statCard({ icon: '⚖️', label: 'Clothes in Factory', value: fmtKg(totalKg), tone: 'warn', foot: pend.length + ' orders' })}
       ${UI.statCard({ icon: '⏰', label: '7 din se ziyada purane', value: fmtNum(old.length), tone: old.length ? 'bad' : 'good', foot: old.length ? 'Priority delivery' : 'Sab time par' })}
       ${UI.statCard({ icon: '✅', label: 'Delivered Today', value: fmtKg(round1(Biz.deliveredIn({ match: d => d === todayISO() }).reduce((a, s) => a + num(s.deliveredKg || s.kgTotal), 0))), tone: 'good' })}
     </div>
@@ -3936,7 +4365,7 @@ function deliveryPaint() {
         <table class="tbl" style="min-width:980px">
           <thead><tr>
             <th>Invoice</th><th>Customer</th><th>Received</th><th class="t-center">Age</th>
-            <th class="t-right">Received KG</th><th class="t-right">Pending KG</th><th class="t-center">Pcs</th>
+            <th class="t-right">Received KG</th><th class="t-right">Pending KG</th>
             <th>Items</th><th class="t-center">Action</th>
           </tr></thead>
           <tbody>
@@ -3949,7 +4378,6 @@ function deliveryPaint() {
                 <td class="t-center"><span class="pill ${s.ageDays > 7 ? 'pill-due' : (s.ageDays > 3 ? 'pill-warn' : 'pill-muted')}">${s.ageDays} din</span></td>
                 <td class="t-right">${fmtKg(s.kgTotal)}</td>
                 <td class="t-right t-strong t-warn">${fmtKg(pk)}</td>
-                <td class="t-center">${fmtNum(num(s.piecesTotal) - num(s.deliveredPcs))}</td>
                 <td class="tiny">${esc(Biz.saleItemsSummary(s))}</td>
                 <td class="t-center t-nowrap">
                   <button class="btn btn-success btn-xs" data-deliver="${s.id}">✔ Deliver</button>
@@ -3957,10 +4385,10 @@ function deliveryPaint() {
                   <button class="icon-btn" style="width:28px;height:28px;font-size:11px" data-pay="${s.id}" title="Payment">💵</button>
                 </td>
               </tr>`;
-  }).join('') : emptyRow(9, 'Factory khali hai — koi delivery pending nahi 🎉', '🎉')}
+  }).join('') : emptyRow(8, 'Factory khali hai — koi delivery pending nahi 🎉', '🎉')}
           </tbody>
           ${pend.length ? `<tfoot><tr><td colspan="4">TOTAL</td><td class="t-right">${fmtKg(round1(pend.reduce((a, s) => a + num(s.kgTotal), 0)))}</td>
-            <td class="t-right">${fmtKg(totalKg)}</td><td class="t-center">${fmtNum(totalPcs)}</td><td colspan="2"></td></tr></tfoot>` : ''}
+            <td class="t-right">${fmtKg(totalKg)}</td><td colspan="2"></td></tr></tfoot>` : ''}
         </table>
       </div>
     </div>`;
@@ -3974,9 +4402,9 @@ function deliveryPaint() {
   $$('.row-click', el).forEach(t => t.onclick = () => openSaleDetail(t.dataset.view));
   $('#dvNew').onclick = () => app.go('newsales');
   $('#dvExport').onclick = () => exportCSV('delivery-queue-' + todayISO() + '.csv',
-    ['Invoice', 'Customer', 'Received', 'Age Days', 'Received KG', 'Pending KG', 'Pieces', 'Items'],
+    ['Invoice', 'Customer', 'Received', 'Age Days', 'Received KG', 'Pending KG', 'Items'],
     pend.map(s => [s.invoiceNo, Biz.customerName(s.customerId), s.entryDate, s.ageDays, s.kgTotal, Biz.pendingKg(s),
-    num(s.piecesTotal) - num(s.deliveredPcs), Biz.saleItemsSummary(s)]));
+    Biz.saleItemsSummary(s)]));
 }
 
 </script>
@@ -4167,7 +4595,7 @@ function openCustomerProfile(id) {
 
   const kpis = `
     <div class="stats" style="margin-bottom:12px">
-      ${UI.statCard({ icon: '⚖️', label: 'Total Wash KG', value: fmtKg(acc.kgTotal), foot: acc.count + ' entries · ' + fmtNum(acc.piecesTotal) + ' pcs', tone: 'purple' })}
+      ${UI.statCard({ icon: '⚖️', label: 'Total Wash KG', value: fmtKg(acc.kgTotal), foot: acc.count + ' entries', tone: 'purple' })}
       ${UI.statCard({ icon: '🏭', label: 'In Factory', value: fmtKg(acc.kgInFactory), tone: acc.kgInFactory > 0 ? 'warn' : 'good' })}
       ${UI.statCard({ icon: '💰', label: 'Total Billed', value: fmtMoney(acc.amount), foot: 'Avg ' + fmtMoney(acc.kgTotal ? round2(acc.amount / acc.kgTotal) : 0) + '/kg', tone: 'info' })}
       ${UI.statCard({ icon: '📒', label: 'Balance Due', value: fmtMoney(acc.balance), foot: fmtKg(acc.kgBalance) + ' baqi' + (acc.advance > 0 ? ' · Adv ' + fmtMoney(acc.advance) : ''), tone: acc.balance > 0.009 ? 'bad' : 'good' })}
@@ -4413,7 +4841,7 @@ function ledgerPaint() {
       <div class="card-body tight">
         <div class="grid g4" style="gap:10px">
           <div class="note-box info tiny"><b>Total Received (wash)</b><div class="big">${fmtKg(acc.kgTotal)}</div>
-            <span class="tiny">${acc.count} entries · ${fmtNum(acc.piecesTotal)} pcs</span></div>
+            <span class="tiny">${acc.count} entries</span></div>
           <div class="note-box tiny"><b>Total Billed</b><div class="big">${fmtMoney(acc.amount)}</div>
             <span class="tiny">Rate ${fmtMoney(acc.kgTotal ? round2(acc.amount / acc.kgTotal) : Biz.rate())}/kg</span></div>
           <div class="note-box ok tiny"><b>Total Paid</b><div class="big">${fmtMoney(acc.paid)}</div>
@@ -4853,15 +5281,51 @@ function renderProducts() {
   productsPaint();
 }
 
+/** 🧩 Types editor — kisi bhi item ke types yahan se manage karein */
+function productTypesForm(pid) {
+  const p = DB.get('products', pid);
+  if (!p) return;
+  const body = `
+    <div class="note-box info tiny mb10">
+      <b>${esc(p.name)}</b> ke types — jaise <i>Junior Shoes, Sports Shoes, Man Shoes, CH Shoes</i>.<br>
+      New Sales ke <b>Step 03</b> mein yeh types KG ke sath dikhte hain (aur cashier wahin se naye type bhi add kar sakta hai).
+    </div>
+    <label class="fld"><span>Types (comma se alag, ya har type nayi line mein)</span>
+      <textarea class="inp" id="ptList" style="min-height:110px" placeholder="Junior Shoes, Sports Shoes, Man Shoes, CH Shoes">${esc(((p.types) || []).join(', '))}</textarea></label>
+    <div class="row" style="gap:6px;flex-wrap:wrap">
+      ${['Junior', 'Sports', 'Man', 'CH', 'Kids', 'Ladies', 'Gents'].map(t => `<button class="btn btn-ghost btn-xs" data-ptquick="${t}">+ ${t}</button>`).join('')}
+    </div>
+    <div class="fld-hint">Buttons se naam add ho jata hai — phir apne hisaab se badal sakte hain.</div>`;
+  const w = openModal({
+    title: '🧩 Types — ' + p.name, size: 'sm', body,
+    footer: `<button class="btn btn-ghost" data-close="1">Cancel</button>
+             <button class="btn btn-primary" id="ptSave">💾 Save Types</button>`
+  });
+  const ta = $('#ptList', w);
+  $$('[data-ptquick]', w).forEach(b => b.onclick = () => {
+    const cur = ta.value.split(/[,\n]/).map(x => x.trim()).filter(Boolean);
+    if (cur.indexOf(b.dataset.ptquick) < 0) cur.push(b.dataset.ptquick);
+    ta.value = cur.join(', ');
+    ta.focus();
+  });
+  $('#ptSave', w).onclick = () => {
+    const out = [];
+    ta.value.split(/[,\n]/).map(x => x.trim()).filter(Boolean).forEach(x => { if (out.indexOf(x) < 0) out.push(x); });
+    DB.upsert('products', Object.assign({}, p, { types: out }));
+    DB.audit('product', 'Types update: ' + p.name + ' → ' + out.join(', '));
+    toast('✔ ' + p.name + ' ke types save ho gaye (' + out.length + ')', 'success');
+    closeModal(w);
+    productsPaint();
+  };
+}
+
 function productsPaint() {
   const el = $('#prodBody');
   if (!el) return;
-  const cats = Biz.categories();
   let rows = DB.all('products').filter(p => ProdUI.showInactive || p.active !== false);
-  if (ProdUI.cat !== 'all') rows = rows.filter(p => p.category === ProdUI.cat);
   const q = ProdUI.q.trim().toLowerCase();
   if (q) rows = rows.filter(p => (p.name || '').toLowerCase().includes(q));
-  rows.sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.name).localeCompare(String(b.name)));
+  rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
   const sales = Biz.sales();
   const usage = {};
@@ -4874,20 +5338,14 @@ function productsPaint() {
   el.innerHTML = `
     <div class="stats">
       ${UI.statCard({ icon: '🧺', label: 'Total Products', value: fmtNum(rows.length), tone: 'info' })}
-      ${cats.map(c => UI.statCard({
-    icon: '🏷️', label: esc(c.label), value: fmtNum(rows.filter(p => p.category === c.key).length),
-    tone: 'purple', foot: 'Rate ' + fmtMoney(Biz.rate()) + '/kg'
-  })).join('')}
+      ${UI.statCard({ icon: '⚖️', label: 'Rate / KG (sab items)', value: fmtMoney(Biz.rate()), tone: 'purple', foot: 'Settings se change karein' })}
+      ${UI.statCard({ icon: '✅', label: 'Active Items', value: fmtNum(rows.filter(p => p.active !== false).length), tone: 'good' })}
     </div>
 
     <div class="card">
       <div class="card-head">
         <h3>🧺 Product List — New Sales mein yahi items click hote hain</h3><div class="sp"></div>
         <button class="btn btn-warn btn-sm" id="pRateBtn" title="Per KG rate edit karein">⚖️ Rate: ${fmtMoney(Biz.rate())}/kg ✏️ Edit</button>
-        <select class="inp inp-sm" id="pCat" style="width:150px">
-          <option value="all" ${ProdUI.cat === 'all' ? 'selected' : ''}>All categories</option>
-          ${cats.map(c => `<option value="${c.key}" ${ProdUI.cat === c.key ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
-        </select>
         <input class="inp inp-sm" id="pSearch" placeholder="🔍 Item ka naam" value="${esc(ProdUI.q)}" style="width:190px"/>
         <label class="row small dim" style="gap:6px;font-weight:700"><input type="checkbox" id="pInact" ${ProdUI.showInactive ? 'checked' : ''}/> Inactive bhi</label>
         <button class="btn btn-ghost btn-sm" id="pExport">⬇️ CSV</button>
@@ -4896,14 +5354,16 @@ function productsPaint() {
       <div class="tbl-wrap">
         <table class="tbl" style="min-width:820px">
           <thead><tr>
-            <th>Item Name</th><th>Category</th><th class="t-center">Input</th><th class="t-right">Rate</th>
+            <th>Item Name</th><th>Types (Step 03)</th><th class="t-right">Rate</th>
             <th class="t-right">Wash KG (all time)</th><th class="t-center">Times Used</th><th class="t-center">Status</th>
             <th class="t-center">Actions</th>
           </tr></thead>
           <tbody>${rows.length ? rows.map(p => `<tr>
             <td class="t-strong">${esc(p.name)}${p.note ? '<div class="tiny muted">' + esc(p.note) + '</div>' : ''}</td>
-            <td><span class="tag" style="background:${Biz.catColor(p.category)}22;color:${Biz.catColor(p.category)}">${esc(p.category)} Category</span></td>
-            <td class="t-center tiny">${esc(p.inputType || 'kg') === 'kg' ? '⚖️ KG' : '🔢 Pcs'}</td>
+            <td class="tiny">${(p.types && p.types.length)
+      ? p.types.map(t => `<span class="tag" style="margin:1px 2px">${esc(t)}</span>`).join('')
+      : '<span class="muted">—</span>'}
+              <button class="icon-btn" style="width:24px;height:24px;font-size:10px;vertical-align:middle" data-ptypes="${p.id}" title="Types edit karein">🧩</button></td>
             <td class="t-right">${fmtMoney(Biz.rate())}</td>
             <td class="t-right">${fmtKg((usage[p.id] || {}).kg || 0)}</td>
             <td class="t-center">${fmtNum((usage[p.id] || {}).count || 0)}</td>
@@ -4913,28 +5373,31 @@ function productsPaint() {
               <button class="icon-btn" style="width:28px;height:28px;font-size:11px" data-ptoggle="${p.id}" title="Active/Inactive">${p.active === false ? '✅' : '🚫'}</button>
               <button class="icon-btn" style="width:28px;height:28px;font-size:11px" data-pdel="${p.id}" title="Delete">🗑️</button>
             </td>
-          </tr>`).join('') : emptyRow(8, 'Koi product nahi — “New Product” se add karein', '🧺')}</tbody>
+          </tr>`).join('') : emptyRow(7, 'Koi product nahi — “New Product” se add karein', '🧺')}</tbody>
         </table>
       </div>
     </div>
 
     <div class="card"><div class="card-body">
       <div class="note-box info tiny">
-        <b>Kaise kaam karta hai:</b> New Sales page par har category (A/B/C) mein in items ke chips dikhte hain.
+        <b>Types (Step 03):</b> har item ke chhote types (jaise Shoes → <i>Junior / Sports / Man / CH</i>) yahan se set karein —
+        New Sales ke <b>Step 03</b> mein yeh KG ke sath khud nazar aayenge. Cashier wahin naya type bhi add kar sakta hai
+        (khud isi list mein save ho jata hai).<br>
+        <b>Kaise kaam karta hai:</b> New Sales page par in tamam items ke chips ek hi jagah dikhte hain.
         Cashier item par click karta hai aur KG enter karke “Add to Slip” dabata hai — item invoice mein aa jata hai.
         Billing sab ka <b>ek hi rate</b> (${fmtMoney(Biz.rate())} per KG) hota hai, jo Settings se change karein.
       </div>
     </div></div>`;
 
-  const sc = $('#pCat'); if (sc) sc.onchange = e => { ProdUI.cat = e.target.value; productsPaint(); };
   const sq = $('#pSearch'); if (sq) sq.oninput = debounce(e => { ProdUI.q = e.target.value; productsPaint(); }, 250);
   const si = $('#pInact'); if (si) si.onchange = e => { ProdUI.showInactive = e.target.checked; productsPaint(); };
   const rb = $('#pRateBtn'); if (rb) rb.onclick = () => openRateForm();
   $('#pNew').onclick = () => productForm();
-  $('#pExport').onclick = () => exportCSV('products.csv', ['Name', 'Category', 'Input', 'Rate', 'Total KG', 'Times Used', 'Active'],
-    rows.map(p => [p.name, p.category, p.inputType, Biz.rate(), (usage[p.id] || {}).kg || 0, (usage[p.id] || {}).count || 0, p.active !== false]));
+  $('#pExport').onclick = () => exportCSV('products.csv', ['Name', 'Types', 'Rate', 'Total KG', 'Times Used', 'Active'],
+    rows.map(p => [p.name, (p.types || []).join(' | '), Biz.rate(), (usage[p.id] || {}).kg || 0, (usage[p.id] || {}).count || 0, p.active !== false]));
 
   $$('[data-pedit]', el).forEach(b => b.onclick = () => productForm(b.dataset.pedit));
+  $$('[data-ptypes]', el).forEach(b => b.onclick = () => productTypesForm(b.dataset.ptypes));
   $$('[data-ptoggle]', el).forEach(b => b.onclick = () => {
     const p = DB.get('products', b.dataset.ptoggle);
     DB.upsert('products', Object.assign({}, p, { active: p.active === false }));
@@ -4951,30 +5414,23 @@ function productsPaint() {
   });
 }
 
-/* productForm(existingIdOrProduct, defaultCategory) → Promise<product|null> */
-function productForm(idOrProd, defCat) {
+/* productForm(existingIdOrProduct) → Promise<product|null> */
+function productForm(idOrProd) {
   return new Promise(resolve => {
     const p = (idOrProd && typeof idOrProd === 'object') ? idOrProd : (idOrProd ? DB.get('products', idOrProd) : null);
-    const cats = Biz.categories();
     const body = `
       <div class="grid g2">
         <label class="fld"><span>Item Name <b class="req">*</b></span>
           <input class="inp" id="prName" value="${esc(p ? p.name : '')}" placeholder="e.g. Wash & Fold / Bedsheet Wash"/></label>
-        <label class="fld"><span>Category <b class="req">*</b></span>
-          <select class="inp" id="prCat">${cats.map(c => `<option value="${c.key}" ${((p ? p.category : defCat) === c.key) ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}</select></label>
-      </div>
-      <div class="grid g2">
-        <label class="fld"><span>Input Type</span>
-          <select class="inp" id="prInput">
-            <option value="kg" ${!p || p.inputType !== 'pcs' ? 'selected' : ''}>KG (weight se)</option>
-            <option value="pcs" ${p && p.inputType === 'pcs' ? 'selected' : ''}>Pieces</option>
-          </select></label>
         <label class="fld"><span>Status</span>
           <select class="inp" id="prActive">
             <option value="1" ${!p || p.active !== false ? 'selected' : ''}>Active (New Sales mein dikhega)</option>
             <option value="0" ${p && p.active === false ? 'selected' : ''}>Inactive</option>
           </select></label>
       </div>
+      <label class="fld"><span>Types / Breakup (comma se alag — optional)</span>
+        <input class="inp" id="prTypes" value="${esc(((p && p.types) || []).join(', '))}" placeholder="Junior Shoes, Sports Shoes, Man Shoes, CH Shoes"/>
+        <div class="fld-hint">New Sales ke <b>Step 03</b> mein yeh types KG ke sath dikhte hain. Cashier wahin se bhi naya type add kar sakta hai.</div></label>
       <label class="fld"><span>Note (optional)</span><input class="inp" id="prNote" value="${esc(p ? p.note : '')}" placeholder="e.g. sirf heavy kapron ke liye"/></label>
       <div class="note-box info tiny">Billing rate sab items ke liye ek hi hai — <b>${fmtMoney(Biz.rate())} / KG</b> (Settings → Per KG Rate).</div>`;
 
@@ -4991,7 +5447,12 @@ function productForm(idOrProd, defCat) {
       if (!name) return toast('Item ka naam likhein', 'error');
       const rec = {
         id: p ? p.id : uid('prd'),
-        name, category: $('#prCat', w).value, inputType: $('#prInput', w).value,
+        name, category: (p && p.category) || '', inputType: 'kg',
+        types: (function (v) {
+          const out = [];
+          String(v || '').split(/[,\n]/).map(x => x.trim()).filter(Boolean).forEach(x => { if (out.indexOf(x) < 0) out.push(x); });
+          return out;
+        })($('#prTypes', w).value),
         active: $('#prActive', w).value === '1', note: $('#prNote', w).value,
         createdAt: p ? p.createdAt : new Date().toISOString()
       };
@@ -5972,7 +6433,7 @@ function reportsPaint() {
   const m = Biz.metrics(Period);
   const tabs = [
     ['pl', '🧮 Profit &amp; Loss'],
-    ['kg', '⚖️ KG / Category'],
+    ['kg', '⚖️ KG / Item'],
     ['cust', '👥 Customer-wise'],
     ['exp', '💸 Expenses'],
     ['del', '🚚 Delivery & Pending'],
@@ -6058,10 +6519,9 @@ function reportsPaint() {
     const sales = Biz.salesIn(Period);
     const byProduct = {};
     sales.forEach(s => (s.lines || []).forEach(l => {
-      const key = ((Biz.product(l.productId) || {}).name || l.productName || 'Item') + ' [' + (l.category || '-') + ']';
-      byProduct[key] = byProduct[key] || { kg: 0, pcs: 0, amount: 0, count: 0 };
+      const key = Biz.lineName(l);   // "SHOES — Junior Shoes" (type ho to)
+      byProduct[key] = byProduct[key] || { kg: 0, amount: 0, count: 0 };
       byProduct[key].kg = round1(byProduct[key].kg + num(l.qtyKg));
-      byProduct[key].pcs += num(l.pcs);
       byProduct[key].amount = round2(byProduct[key].amount + num(l.qtyKg) * Biz.saleRate(s));
       byProduct[key].count++;
     }));
@@ -6073,22 +6533,18 @@ function reportsPaint() {
             <button class="btn btn-ghost btn-sm" id="kgCsv">⬇️ CSV</button></div>
           <div class="tbl-wrap">
             <table class="tbl" style="min-width:640px">
-              <thead><tr><th>Item</th><th class="t-right">KG</th><th class="t-right">Pieces</th><th class="t-center">Times</th><th class="t-right">Amount</th></tr></thead>
+              <thead><tr><th>Item</th><th class="t-right">KG</th><th class="t-center">Times</th><th class="t-right">Amount</th></tr></thead>
               <tbody>${keys.length ? keys.map(k => `<tr><td class="t-strong">${esc(k)}</td><td class="t-right">${fmtKg(byProduct[k].kg)}</td>
-                <td class="t-right">${fmtNum(byProduct[k].pcs)}</td><td class="t-center">${fmtNum(byProduct[k].count)}</td>
-                <td class="t-right">${fmtMoney(byProduct[k].amount)}</td></tr>`).join('') : emptyRow(5, 'Koi data nahi', '📭')}</tbody>
-              <tfoot><tr><td>TOTAL</td><td class="t-right">${fmtKg(m.receivedKg)}</td><td class="t-right">${fmtNum(m.receivedPcs)}</td>
+                <td class="t-center">${fmtNum(byProduct[k].count)}</td>
+                <td class="t-right">${fmtMoney(byProduct[k].amount)}</td></tr>`).join('') : emptyRow(4, 'Koi data nahi', '📭')}</tbody>
+              <tfoot><tr><td>TOTAL</td><td class="t-right">${fmtKg(m.receivedKg)}</td>
                 <td></td><td class="t-right">${fmtMoney(m.income)}</td></tr></tfoot>
             </table>
           </div>
         </div>
-        <div class="card">
-          <div class="card-head"><h3>🏷️ Category Split</h3></div>
-          <div class="card-body">${UI.catDonut(m.catKg)}</div>
-        </div>
       </div>`;
     $('#kgCsv').onclick = () => exportCSV('kg-report-' + Period.shortLabel().replace(/\s/g, '') + '.csv',
-      ['Item', 'KG', 'Pieces', 'Times', 'Amount'], keys.map(k => [k, byProduct[k].kg, byProduct[k].pcs, byProduct[k].count, byProduct[k].amount]));
+      ['Item', 'KG', 'Times', 'Amount'], keys.map(k => [k, byProduct[k].kg, byProduct[k].count, byProduct[k].amount]));
   }
 
   if (RepUI.tab === 'cust') {
@@ -6432,7 +6888,7 @@ function settingsPaint() {
   const s = DB.settings();
   const tabs = [
     ['shop', '🏪 Shop Profile'],
-    ['rate', '⚖️ Rate &amp; Categories'],
+    ['rate', '⚖️ Rate per KG'],
     ['cloud', '☁️ Cloud Sync'],
     ['backup', '💾 Backup &amp; Data'],
     ['about', 'ℹ️ Help']
@@ -6573,7 +7029,7 @@ function settingsPaint() {
         <div class="card">
           <div class="card-head"><h3>⚖️ Per KG Rate</h3></div>
           <div class="card-body">
-            <div class="note-box info tiny mb10">Aap ne “ek rate sab ke liye” choose kiya hai — A/B/C category sirf KG record aur grading ke liye hai. Bill total KG × rate par banta hai.</div>
+            <div class="note-box info tiny mb10">Billing <b>total KG × rate</b> par banti hai — sab items aur sab customers ke liye ek hi rate.</div>
             <div class="row" style="gap:8px;align-items:end">
               <label class="fld mb0 flex1"><span>Rate per KG (Rs)</span>
                 <input type="number" step="1" class="inp" id="stRate" value="${num(s.ratePerKg)}"/></label>
@@ -6585,23 +7041,7 @@ function settingsPaint() {
             <div class="divider"></div>
             <div class="kv"><span>Example: 10 kg wash</span><b>${fmtMoney(round2(10 * num(s.ratePerKg)))}</b></div>
             <div class="kv"><span>Example: 240 kg wash</span><b>${fmtMoney(round2(240 * num(s.ratePerKg)))}</b></div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-head"><h3>🏷️ Categories (A / B / C)</h3><div class="sp"></div>
-            <button class="btn btn-ghost btn-sm" id="stAddCat">➕ Add Category</button></div>
-          <div class="card-body">
-            <div id="catList">
-              ${(s.categories || []).map((c, i) => `
-                <div class="row mb10" style="gap:8px;align-items:end" data-catrow="${i}">
-                  <label class="fld mb0" style="width:90px"><span>Key</span><input class="inp" data-catkey value="${esc(c.key)}"/></label>
-                  <label class="fld mb0 flex1"><span>Label</span><input class="inp" data-catlabel value="${esc(c.label)}"/></label>
-                  <label class="fld mb0 flex1"><span>Description</span><input class="inp" data-catdesc value="${esc(c.desc || '')}"/></label>
-                  <label class="fld mb0" style="width:70px"><span>Colour</span><input type="color" class="inp" data-catcolor value="${esc(c.color)}" style="padding:2px;height:40px"/></label>
-                  <button class="icon-btn" data-catdel="${i}">🗑️</button>
-                </div>`).join('')}
-            </div>
-            <button class="btn btn-primary mt10" id="stSaveCats">💾 Save Categories</button>
+            <div class="kv"><span>Purani entry par purana rate</span><b>Ledger → Receive Payment → “Kis rate par?”</b></div>
           </div>
         </div>
       </div>
@@ -6627,32 +7067,6 @@ function settingsPaint() {
       toast('✔ Rate update ho gaya', 'success');
       settingsPaint();
     };
-    $('#stAddCat').onclick = () => {
-      const cats = (DB.settings().categories || []).slice();
-      const key = String.fromCharCode(65 + cats.length);
-      cats.push({ key, label: key + ' Category', color: '#7c5cff', desc: '' });
-      DB.saveSettings({ categories: cats });
-      settingsPaint();
-    };
-    $$('[data-catdel]', pane).forEach(b => b.onclick = () => {
-      const cats = (DB.settings().categories || []).slice();
-      cats.splice(+b.dataset.catdel, 1);
-      DB.saveSettings({ categories: cats });
-      settingsPaint();
-    });
-    $('#stSaveCats').onclick = () => {
-      const cats = $$('[data-catrow]', pane).map(r => ({
-        key: r.querySelector('[data-catkey]').value.trim().toUpperCase() || 'A',
-        label: r.querySelector('[data-catlabel]').value.trim(),
-        desc: r.querySelector('[data-catdesc]').value.trim(),
-        color: r.querySelector('[data-catcolor]').value
-      }));
-      if (!cats.length) return toast('Kam az kam ek category rakhein', 'error');
-      DB.saveSettings({ categories: cats });
-      DB.audit('settings', 'Categories update hui');
-      toast('✔ Categories save ho gayi', 'success');
-      settingsPaint();
-    };
     $('#stSaveCats2').onclick = () => {
       DB.saveSettings({
         expenseCategories: $('#stExpCats', pane).value.split(',').map(x => x.trim()).filter(Boolean),
@@ -6662,56 +7076,87 @@ function settingsPaint() {
     };
   }
 
-  /* ---------------- CLOUD SYNC ---------------- */
+  /* ---------------- CLOUD SYNC (v2 — config device par save hoti hai) ---------------- */
   if (SetUI.tab === 'cloud') {
-    const cfg = Cloud.parseConfig(s.firebaseConfig);
+    const cfg = Cloud.cfg;
+    const st = Cloud.statusLabel();
+    const dot = Cloud.dotColor();
+    const shops = Cloud._shops || [];
     pane.innerHTML = `
       <div class="grid g-2-1">
         <div class="card">
-          <div class="card-head"><h3>☁️ Firebase Cloud Sync (optional)</h3><div class="sp"></div>
-            <span class="pill ${s.cloudEnabled ? 'pill-ok' : 'pill-muted'}">${s.cloudEnabled ? 'ON' : 'OFF'}</span></div>
+          <div class="card-head"><h3>☁️ Firebase Cloud Sync</h3><div class="sp"></div>
+            <span class="pill ${Cloud.ready ? 'pill-ok' : 'pill-muted'}">${Cloud.ready ? (Cloud.cfg.enabled ? 'ON' : 'READY') : 'OFF'}</span></div>
           <div class="card-body">
-            <div class="note-box info tiny mb10">
-              Cloud ke bina bhi portal poora chalta hai (data aap ke browser mein save hota hai).
-              Cloud ON karne se <b>aap ke bane hue Firebase project</b> par data sync ho jata hai —
-              doosre device/phone se bhi same data milta hai.
+            <div class="note-box ok tiny mb10">
+              🔒 <b>Config ab is device par alag save hoti hai</b> — cloud se data aane par bhi kabhi delete nahi hoti.
+              Cloud par sirf aap ka <b>business data</b> jata hai (sales, customers, payments…).
             </div>
-            <label class="fld"><span>Firebase databaseURL / Config</span>
-              <textarea class="inp" id="stCfg" style="min-height:96px" placeholder='https://your-project-default-rtdb.firebaseio.com'>${esc(s.firebaseConfig || '')}</textarea>
-              <div class="fld-hint">Sirf URL bhi chalega. Ya Firebase console se poora config snippet paste kar dein (hum databaseURL khud nikal lete hain).</div></label>
-            <label class="fld"><span>Shop ID (agar ek hi Firebase par 2 portals hain to alag rakhein)</span>
-              <input class="inp" id="stShopId" value="${esc(s.shopId || 'factory-main')}" placeholder="factory-main"/>
-              <div class="fld-hint">Purane shop portal se alag rakhne ke liye yahan alag naam likhein — data mix nahi hoga.</div></label>
-            <div class="row" style="gap:8px">
+
+            <label class="fld"><span>Firebase databaseURL</span>
+              <textarea class="inp" id="stCfg" style="min-height:70px" placeholder="https://mrlaundryfactory-default-rtdb.firebaseio.com">${esc(cfg.url || '')}</textarea>
+              <div class="fld-hint">Sirf URL chalega, ya console ka poora config snippet paste kar dein (hum databaseURL khud nikal lete hain).</div></label>
+
+            <label class="fld"><span>Shop ID (is data-set ka naam)</span>
+              <input class="inp" id="stShopId" value="${esc(cfg.shopId || 'main')}" placeholder="main"/>
+              <div class="fld-hint">Har device par <b>yehi Shop ID</b> honi chahiye taake sab ek hi data dekhein. Do alag kaam (factory / shop) ke liye Shop ID alag rakhein.</div></label>
+
+            ${shops.length ? `<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:4px">
+              <span class="tiny muted" style="align-self:center">Is database mein maujood data-sets:</span>
+              ${shops.map(k => `<button class="btn ${k === cfg.shopId ? 'btn-primary' : 'btn-ghost'} btn-xs" data-shopset="${esc(k)}">${esc(k)}</button>`).join('')}
+            </div>` : `<div class="tiny muted" style="margin-top:4px">Data-sets dekhne ke liye <b>Test Connection</b> dabayein.</div>`}
+
+            <div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap">
+              <button class="btn btn-primary" id="stSaveCfg">💾 Save &amp; Connect</button>
               <button class="btn btn-ghost" id="stTest">🔌 Test Connection</button>
-              <button class="btn btn-primary" id="stSaveCfg">💾 Save Config</button>
             </div>
             <div class="divider"></div>
-            <label class="row" style="gap:8px;font-weight:800"><input type="checkbox" id="stCloudOn" ${s.cloudEnabled ? 'checked' : ''}/> Cloud Sync ON karein</label>
-            <div class="row mt10" style="gap:8px">
-              <button class="btn btn-success btn-sm" id="stPush">⬆️ Abhi Cloud par Bhejein (Push)</button>
-              <button class="btn btn-ghost btn-sm" id="stPull">⬇️ Cloud se Lein (Pull)</button>
+            <label class="row" style="gap:8px;font-weight:800"><input type="checkbox" id="stCloudOn" ${cfg.enabled ? 'checked' : ''}/> Cloud Sync ON (auto sync)</label>
+            <div class="row mt10" style="gap:8px;flex-wrap:wrap">
+              <button class="btn btn-success btn-sm" id="stPush">⬆️ Cloud par bhejein (is device ka data)</button>
+              <button class="btn btn-warn btn-sm" id="stPull">⬇️ Cloud se laayein (dusre device ka data)</button>
             </div>
-            <div class="tiny muted mt10">Status: ${esc(Cloud.statusLabel())}${cfg ? ' · URL: ' + esc(cfg.url) : ''}</div>
+            <div class="tiny muted mt10">Status: <b style="color:${dot}">${esc(st)}</b></div>
           </div>
         </div>
+
         <div class="card">
-          <div class="card-head"><h3>🔧 Naya Firebase Project — 5 minute setup</h3></div>
-          <div class="card-body small" style="line-height:1.9">
-            <b>1.</b> <a href="https://console.firebase.google.com" target="_blank">console.firebase.google.com</a> → <b>Add project</b> → naam e.g. <i>mr-laundry-factory</i>.<br>
-            <b>2.</b> Left menu → <b>Build → Realtime Database</b> → <b>Create Database</b> → location sindh/asia → <b>Start in test mode</b>.<br>
-            <b>3.</b> Database ke top par URL milega — e.g. <span class="mono">https://mr-laundry-factory-default-rtdb.firebaseio.com</span> — woh copy kar ke yahan paste kar dein.<br>
-            <b>4.</b> <b>Rules</b> tab mein yeh likh dein (test ke liye) aur Publish karein:
-            <pre class="codesnip">{
+          <div class="card-head"><h3>📡 Sync Report (diagnostics)</h3></div>
+          <div class="card-body">
+            <div class="kv"><span>Device par config saved</span><b class="${Cloud.cfgSaved() ? 't-ok' : 't-bad'}">${Cloud.cfgSaved() ? '✔ Haan' : '— Nahi'}</b></div>
+            <div class="kv"><span>URL</span><b class="tiny">${esc(Cloud.url || '—')}</b></div>
+            <div class="kv"><span>Shop ID</span><b>${esc(Cloud.shopId || '—')}</b></div>
+            <div class="kv"><span>Cloud sync</span><b>${Cloud.cfg.enabled ? 'ON' : 'OFF'}</b></div>
+            <div class="kv"><span>Last push (yahan se gaya)</span><b class="tiny">${Cloud._lastPushedAt ? new Date(Cloud._lastPushedAt).toLocaleString() : '—'}</b></div>
+            <div class="kv"><span>Last pull (yahan aaya)</span><b class="tiny">${Cloud._lastPulledAt ? new Date(Cloud._lastPulledAt).toLocaleString() : '—'}</b></div>
+            <div class="kv"><span>Pending changes</span><b>${Cloud._pendingPush ? '<span class="t-warn">Bhejna baqi — auto retry chal raha hai</span>' : 'Kuch nahi ✔'}</b></div>
+            ${Cloud._lastError ? `<div class="note-box bad tiny mt10">⚠️ <b>Last error:</b> ${esc(Cloud._lastError)}
+              ${Cloud._lastErrorAt ? '<br><span class="tiny muted">' + new Date(Cloud._lastErrorAt).toLocaleString() + '</span>' : ''}
+              <br>Ziyada tar yeh Firebase <b>rules</b> ki wajah se hota hai — neeche wale rules dobara Publish kar dein.</div>` : ''}
+            <div class="note-box info tiny mt10">
+              <b>Naye computer par kya karna hai?</b><br>
+              1) Yahi portal link kholein → 2) apne username/password se login karein → bas!
+              Data khud aa jayega. (Config default URL se khud lag jati hai; sirf Shop ID wahi honi chahiye.)
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>🔧 Firebase Rules (ek dafa set karein)</h3></div>
+        <div class="card-body small" style="line-height:1.9">
+          Firebase Console → <b>Realtime Database → Rules</b> → yeh paste karke <b>Publish</b> karein:
+          <pre class="codesnip">{
   "rules": {
     "factories": {
       "$shop": { ".read": true, ".write": true }
     }
   }
 }</pre>
-            <b>5.</b> Yahan <b>Save Config</b> → <b>Test Connection</b> → <b>Cloud Sync ON</b> kar dein. Bas!<br>
-            <span class="t-warn">⚠️</span> Public rules sirf testing ke liye theek hain — baad mein Firebase Authentication laga kar rules tight karein.
-            <pre class="codesnip">{
+          <span class="t-warn">⚠️</span> Agar rules <i>test mode</i> ke 30 din pooray hone ki wajah se band ho gaye hon to sync chup-chaap ruk jata hai —
+          usi liye upar <b>diagnostics</b> mein error nazar aa jata hai. Rules Publish karne ke baad <b>Test Connection</b> daba dein.<br>
+          <b>Security behtar karni ho</b> (public link par bhi data band) to Firebase Authentication laga kar yeh rules use karein:
+          <pre class="codesnip">{
   "rules": {
     "factories": {
       "$shop": {
@@ -6721,23 +7166,29 @@ function settingsPaint() {
     }
   }
 }</pre>
-          </div>
         </div>
       </div>`;
-    $('#stSaveCfg').onclick = () => {
-      DB.saveSettings({ firebaseConfig: $('#stCfg', pane).value, shopId: $('#stShopId', pane).value || 'factory-main' });
-      Cloud.init();
-      toast('✔ Config save ho gaya', 'success');
+
+    $$('[data-shopset]', pane).forEach(b => b.onclick = async () => {
+      Cloud.setCfg({ shopId: b.dataset.shopset });
+      settingsPaint();
+      toast('Shop ID "' + b.dataset.shopset + '" set — ab pull kar rahe hain…', 'info');
+      Cloud._didInitialPull = true;
+      await Cloud.pull({ silent: false, force: true, ask: false });
+    });
+    $('#stSaveCfg').onclick = async () => {
+      await Cloud.saveAndConnect($('#stCfg', pane).value, $('#stShopId', pane).value || CLOUD_DEFAULT_SHOP, true);
       settingsPaint();
     };
     $('#stTest').onclick = async () => {
-      DB.saveSettings({ firebaseConfig: $('#stCfg', pane).value, shopId: $('#stShopId', pane).value || 'factory-main' });
+      Cloud.setCfg({ url: $('#stCfg', pane).value, shopId: $('#stShopId', pane).value || CLOUD_DEFAULT_SHOP }, { quiet: true });
+      Cloud.refresh();
       await Cloud.test();
       settingsPaint();
     };
     $('#stCloudOn').onchange = e => { Cloud.setEnabled(e.target.checked); settingsPaint(); };
-    $('#stPush').onclick = () => Cloud.push();
-    $('#stPull').onclick = () => Cloud.pull({ ask: true, force: false });
+    $('#stPush').onclick = () => Cloud.forcePush();
+    $('#stPull').onclick = () => Cloud.forcePull();
   }
 
   /* ---------------- BACKUP & DATA ---------------- */
@@ -6939,12 +7390,14 @@ const app = {
 window.addEventListener('DOMContentLoaded', () => {
   document.documentElement.dataset.theme = UI.theme();
   DB.load();
-  Cloud.init();
+  const boot = Cloud.init();              // config + pehla sync (background)
   const hash = (location.hash || '').replace('#', '');
   const start = (hash && hash !== 'login') ? hash : null;
   const u = DB.currentUser();
   if (u) app.go(start && DB.can(start) ? start : 'dashboard');
   else renderLogin();
+  /* naye system par: cloud se data aane ke baad screen khud refresh */
+  if (boot && boot.then) boot.then(() => { if (DB.currentUser()) app.go(app.current || 'dashboard'); else renderLogin(); }).catch(() => {});
 });
 
 window.addEventListener('hashchange', () => {
