@@ -219,18 +219,30 @@ function settingsPaint() {
               🔒 <b>Config ab is device par alag save hoti hai</b> — cloud se data aane par bhi kabhi delete nahi hoti.
               Cloud par sirf aap ka <b>business data</b> jata hai (sales, customers, payments…).
             </div>
+            <div class="note-box ok tiny mb10">
+              🧠 <b>Sync ab MERGE karta hai</b> — kisi bhi device ka naya invoice/data <b>kabhi delete nahi hota</b>.
+              Record-wise naya wala jeetta hai. Neeche "⬇️ Cloud se milayein" safe hai (kuch udaata nahi);
+              <b>⚠️ Replace</b> wala button sirf tab dabayein jab aap jaan-boojh kar sab kuch cloud se badalna chahein.
+            </div>
 
             <label class="fld"><span>Firebase databaseURL</span>
               <textarea class="inp" id="stCfg" style="min-height:70px" placeholder="https://mrlaundryfactory-default-rtdb.firebaseio.com">${esc(cfg.url || '')}</textarea>
               <div class="fld-hint">Sirf URL chalega, ya console ka poora config snippet paste kar dein (hum databaseURL khud nikal lete hain).</div></label>
 
-            <label class="fld"><span>Shop ID (is data-set ka naam)</span>
-              <input class="inp" id="stShopId" value="${esc(cfg.shopId || 'main')}" placeholder="main"/>
-              <div class="fld-hint">Har device par <b>yehi Shop ID</b> honi chahiye taake sab ek hi data dekhein. Do alag kaam (factory / shop) ke liye Shop ID alag rakhein.</div></label>
+            <label class="fld"><span>Shop ID (is data-set ka naam) ${cfg.shopLocked ? '<b class="t-ok">🔒 set (pakki)</b>' : '<b class="t-warn">🔓 khud-detect</b>'}</span>
+              <input class="inp" id="stShopId" value="${esc(cfg.shopId || 'main')}" placeholder="factory-main"/>
+              <div class="fld-hint">Har device par <b>yehi Shop ID</b> honi chahiye taake sab ek hi data dekhein (aap ki shop id: <b>factory-main</b>).
+              Likh kar <b>Enter</b> dabayein ya bahar click karein — id <b>is device par pakki (lock)</b> ho jati hai aur phir kabhi khud-ba-khud nahi badalti.
+              ${cfg.shopLocked ? '<br><button class="btn btn-ghost btn-xs" id="stShopUnlock">🔓 Unlock karein (khud-detect ki ijazat)</button>' : ''}</div>
+              <div class="tiny t-ok" id="stShopSaved"></div></label>
 
             ${shops.length ? `<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:4px">
               <span class="tiny muted" style="align-self:center">Is database mein maujood data-sets:</span>
-              ${shops.map(k => `<button class="btn ${k === cfg.shopId ? 'btn-primary' : 'btn-ghost'} btn-xs" data-shopset="${esc(k)}">${esc(k)}</button>`).join('')}
+              ${shops.map(k => `<button class="btn ${k === cfg.shopId ? 'btn-primary' : 'btn-ghost'} btn-xs" data-shopset="${esc(k)}">${esc(k)}${k === cfg.shopId ? ' ✓' : ''}</button>`).join('')}
+            </div>
+            <div class="tiny muted" style="margin-top:6px">Purana data kisi doosre dataset mein pada hai? Us ke sath wala button dabayein — data <b>merge</b> ho jayega (kuch bhi delete nahi hota):</div>
+            <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:4px">
+              ${shops.filter(k => k !== cfg.shopId).map(k => `<button class="btn btn-ghost btn-xs" data-shopmerge="${esc(k)}">🔀 ${esc(k)} se data milayein</button>`).join('') || '<span class="tiny muted">Koi doosra dataset nahi.</span>'}
             </div>` : `<div class="tiny muted" style="margin-top:4px">Data-sets dekhne ke liye <b>Test Connection</b> dabayein.</div>`}
 
             <div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap">
@@ -240,8 +252,12 @@ function settingsPaint() {
             <div class="divider"></div>
             <label class="row" style="gap:8px;font-weight:800"><input type="checkbox" id="stCloudOn" ${cfg.enabled ? 'checked' : ''}/> Cloud Sync ON (auto sync)</label>
             <div class="row mt10" style="gap:8px;flex-wrap:wrap">
-              <button class="btn btn-success btn-sm" id="stPush">⬆️ Cloud par bhejein (is device ka data)</button>
-              <button class="btn btn-warn btn-sm" id="stPull">⬇️ Cloud se laayein (dusre device ka data)</button>
+              <button class="btn btn-success btn-sm" id="stPush">⬆️ Cloud par bhejein (merge ho kar jayega)</button>
+              <button class="btn btn-warn btn-sm" id="stPull">⬇️ Cloud se milayein (safe — kuch delete nahi hota)</button>
+              <button class="btn btn-ghost btn-sm" id="stSync">🔄 Abhi sync</button>
+            </div>
+            <div class="row mt10" style="gap:8px;flex-wrap:wrap">
+              <button class="btn btn-danger btn-sm" id="stPullHard" title="Cloud ka data is device par poora replace kar dega (pehle snapshot khud ban jayega)">⚠️ Cloud ka data le kar LOCAL replace karein</button>
             </div>
             <div class="tiny muted mt10">Status: <b style="color:${dot}">${esc(st)}</b></div>
           </div>
@@ -257,6 +273,12 @@ function settingsPaint() {
             <div class="kv"><span>Last push (yahan se gaya)</span><b class="tiny">${Cloud._lastPushedAt ? new Date(Cloud._lastPushedAt).toLocaleString() : '—'}</b></div>
             <div class="kv"><span>Last pull (yahan aaya)</span><b class="tiny">${Cloud._lastPulledAt ? new Date(Cloud._lastPulledAt).toLocaleString() : '—'}</b></div>
             <div class="kv"><span>Pending changes</span><b>${Cloud._pendingPush ? '<span class="t-warn">Bhejna baqi — auto retry chal raha hai</span>' : 'Kuch nahi ✔'}</b></div>
+            <div class="kv"><span>Shop ID lock</span><b class="${Cloud.cfg.shopLocked ? 't-ok' : 't-warn'}">${Cloud.cfg.shopLocked ? '🔒 Pakki (yehi use hogi)' : '🔓 Khud detect (naye device par)'}</b></div>
+            <div class="kv"><span>Aakhri merge</span><b>${Cloud._lastMerge ? esc(Cloud._mergeText(Cloud._lastMerge)) + (Cloud._lastMergeAt ? ' · ' + new Date(Cloud._lastMergeAt).toLocaleTimeString() : '') : '—'}</b></div>
+            <div class="kv"><span>Safety snapshots</span><b>${DataBackup.list().length} maujood (Settings → Backup)</b></div>
+            <div class="divider"></div>
+            <div class="kv"><span><b>Cloud par kya rakha hai</b> (Shop: ${esc(Cloud.shopId || '—')})</span></div>
+            <div class="tiny" id="stCloudLive" style="line-height:1.7">… check ho raha hai</div>
             ${Cloud._lastError ? `<div class="note-box bad tiny mt10">⚠️ <b>Last error:</b> ${esc(Cloud._lastError)}
               ${Cloud._lastErrorAt ? '<br><span class="tiny muted">' + new Date(Cloud._lastErrorAt).toLocaleString() + '</span>' : ''}
               <br>Ziyada tar yeh Firebase <b>rules</b> ki wajah se hota hai — neeche wale rules dobara Publish kar dein.</div>` : ''}
@@ -296,12 +318,56 @@ function settingsPaint() {
         </div>
       </div>`;
 
-    $$('[data-shopset]', pane).forEach(b => b.onclick = async () => {
-      Cloud.setCfg({ shopId: b.dataset.shopset });
+    /* ---- Shop ID: likhte hi save + LOCK (yahan se kabhi khud nahi hate gi) ---- */
+    const shopInput = $('#stShopId', pane);
+    $('#stShopSaved', pane).textContent = Cloud.cfg.shopLocked
+      ? '🔒 Shop ID "' + Cloud.cfg.shopId + '" is device par pakki hai' : '';
+    let lastShop = Cloud.cfg.shopId;
+    const saveShopId = async () => {
+      if (!shopInput) return;
+      const v = Cloud.cleanShopId(shopInput.value);
+      if (!v) { shopInput.value = lastShop; toast('Shop ID khali nahi ho sakti', 'error'); return; }
+      shopInput.value = v;
+      if (v === lastShop && Cloud.cfg.shopLocked) return;
+      Cloud.setShopId(v, { quiet: true });
+      Cloud.refresh();
+      lastShop = v;
+      $('#stShopSaved', pane).innerHTML = '✔ Shop ID <b>' + esc(v) + '</b> save ho gayi — is device par pakki (agla reload bhi isi par hoga)';
+      Cloud.updateDot();
+      toast('✔ Shop ID "' + v + '" save ho gayi — ab yeh kabhi khud nahi badlegi', 'success', 4000);
+      await Cloud.pull({ silent: true, force: true });        // naye dataset se merge (kuch delete nahi hota)
       settingsPaint();
-      toast('Shop ID "' + b.dataset.shopset + '" set — ab pull kar rahe hain…', 'info');
+    };
+    if (shopInput) {
+      shopInput.addEventListener('change', saveShopId);
+      shopInput.addEventListener('blur', saveShopId);
+      shopInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); saveShopId(); } });
+    }
+    /* datasets ki taaza list (taze button aa jayein — Test dabane ki zarurat nahi) */
+    const shopsBefore = (Cloud._shops || []).join(',');
+    Cloud.listShops().then(() => {
+      if ((Cloud._shops || []).join(',') !== shopsBefore) settingsPaint();
+    }).catch(() => {});
+
+    $$('[data-shopmerge]', pane).forEach(btn => btn.onclick = async () => {
+      const from = btn.dataset.shopmerge;
+      const yes = await confirmDialog(
+        '"' + from + '" dataset ka data is device ke data ke sath MILA diya jayega (kuch bhi delete nahi hoga).\n' +
+        'Abhi wali Shop ID (' + Cloud.cfg.shopId + ') wahi rahegi.', { yes: 'Milayein' });
+      if (!yes) return;
+      await Cloud.mergeFromShop(from);
+      settingsPaint();
+    });
+    const unlockBtn = $('#stShopUnlock', pane);
+    if (unlockBtn) unlockBtn.onclick = () => { Cloud.unlockShop(); settingsPaint(); };
+
+    $$('[data-shopset]', pane).forEach(b => b.onclick = async () => {
+      Cloud.setCfg({ shopId: b.dataset.shopset, shopLocked: true });
+      Cloud.refresh();
+      settingsPaint();
+      toast('Shop ID "' + b.dataset.shopset + '" set + lock — ab cloud se milaya ja raha hai…', 'info');
       Cloud._didInitialPull = true;
-      await Cloud.pull({ silent: false, force: true, ask: false });
+      await Cloud.pull({ silent: false, force: true });
     });
     $('#stSaveCfg').onclick = async () => {
       await Cloud.saveAndConnect($('#stCfg', pane).value, $('#stShopId', pane).value || CLOUD_DEFAULT_SHOP, true);
@@ -314,8 +380,25 @@ function settingsPaint() {
       settingsPaint();
     };
     $('#stCloudOn').onchange = e => { Cloud.setEnabled(e.target.checked); settingsPaint(); };
-    $('#stPush').onclick = () => Cloud.forcePush();
-    $('#stPull').onclick = () => Cloud.forcePull();
+    $('#stPush').onclick = async () => { await Cloud.forcePush(); settingsPaint(); };
+    $('#stPull').onclick = async () => { await Cloud.forcePull(); settingsPaint(); };
+    $('#stPullHard').onclick = async () => { await Cloud.forcePullOverwrite(); settingsPaint(); };
+    var _stSyncBtn = $('#stSync');
+    if (_stSyncBtn) _stSyncBtn.onclick = async () => { await Cloud.syncNow(); settingsPaint(); };
+    /* cloud par kya rakha hai — live summary */
+    Cloud.cloudSummary().then(s => {
+      const box = $('#stCloudLive', pane);
+      if (!box) return;
+      if (!s.ok) { box.innerHTML = '<span class="t-warn">' + esc(s.reason || 'check nahi ho saka') + '</span>'; return; }
+      if (s.empty) {
+        box.innerHTML = '<span class="t-warn">Is Shop ID (<b>' + esc(s.shopId) + '</b>) mein cloud par kuch nahi mila — ' +
+          '"⬆️ Cloud par bhejein" dabayein taake is device ka data upload ho jaye.</span>';
+        return;
+      }
+      box.innerHTML = 'Bills: <b>' + fmtNum(s.counts.sales) + '</b> · Customers: <b>' + fmtNum(s.counts.customers) +
+        '</b> · Payments: <b>' + fmtNum(s.counts.payments) + '</b> · Products: <b>' + fmtNum(s.counts.products) + '</b><br>' +
+        'Aakhri tabdeeli: ' + (s.updatedAt ? new Date(s.updatedAt).toLocaleString() + ' <span class="muted">(' + esc(s.by || '—') + ')</span>' : '—');
+    });
   }
 
   /* ---------------- BACKUP & DATA ---------------- */
@@ -362,12 +445,50 @@ function settingsPaint() {
       </div>
 
       <div class="card">
+        <div class="card-head"><h3>🛟 Auto-Backups (safety snapshots)</h3><div class="sp"></div>
+          <button class="btn btn-ghost btn-sm" id="snNow">📸 Abhi snapshot lein</button></div>
+        <div class="card-body">
+          <div class="note-box ok tiny mb10">
+            🛟 Har cloud sync se pehle aur roz aik dafa data ka snapshot <b>khud</b> ban jata hai (6 tak, purane khud saaf hote hain).
+            Kuch ghalat ho jaye — ya ghalti se invoice delete ho jaye — to yahan se <b>foran wapis</b> aa jata hai.
+          </div>
+          <div id="snList"></div>
+        </div>
+      </div>
+
+      <div class="card">
         <div class="card-head"><h3>⚠️ Danger Zone</h3></div>
         <div class="card-body row" style="gap:10px;justify-content:space-between">
           <div class="small"><b class="t-bad">Poora data reset</b><br>Sab kuch (customers, products, sales, settings) delete ho kar fresh portal ban jayega.</div>
           <button class="btn btn-danger" id="dzReset">🗑️ Reset Everything</button>
         </div>
       </div>`;
+
+    /* ---- Safety snapshots list ---- */
+    function snPaint() {
+      const box = $('#snList', pane);
+      if (!box) return;
+      const list = DataBackup.list();
+      if (!list.length) { box.innerHTML = '<div class="tiny muted">Abhi koi snapshot nahi — "📸 Abhi snapshot lein" dabayein.</div>'; return; }
+      box.innerHTML = '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Kab</th><th>Wajah</th><th class="t-right">Bills</th><th class="t-right">Customers</th><th></th></tr></thead><tbody>' +
+        list.map(x => ('<tr><td>' + new Date(x.at).toLocaleString() + '</td><td class="tiny">' + esc(x.reason || '') +
+          (x.shopId ? ' <span class="muted">· ' + esc(x.shopId) + '</span>' : '') + '</td>' +
+          '<td class="t-right">' + fmtNum(x.counts.sales) + '</td><td class="t-right">' + fmtNum(x.counts.customers) + '</td>' +
+          '<td class="t-right"><button class="btn btn-ghost btn-xs" data-snrestore="' + x.i + '">♻️ Restore</button> ' +
+          '<button class="btn btn-ghost btn-xs" data-sndown="' + x.i + '">⬇️</button></td></tr>')).join('') +
+        '</tbody></table></div>';
+      $$('[data-snrestore]', box).forEach(b => b.onclick = async () => {
+        const yes = await confirmDialog('Is snapshot ka data wapis laayein? (maujooda data ka snapshot khud ban jayega — kuch bhi zaya nahi hoga)',
+          { yes: 'Wapis laayein' });
+        if (!yes) return;
+        if (DataBackup.restore(+b.dataset.snrestore)) { app.go('dashboard'); setTimeout(() => location.reload(), 800); }
+      });
+      $$('[data-sndown]', box).forEach(b => b.onclick = () => DataBackup.download(+b.dataset.sndown));
+    }
+    snPaint();
+    $('#snNow').onclick = () => {
+      if (DataBackup.snapshot('manual')) { toast('📸 Snapshot ban gaya ✔', 'success'); snPaint(); }
+    };
 
     $('#bkDown').onclick = () => {
       downloadFile('mr-laundry-factory-backup-' + todayISO() + '.json', DB.backupJSON(), 'application/json');
@@ -408,6 +529,7 @@ function settingsPaint() {
     $('#dmClear').onclick = async () => {
       const yes = await confirmDialog('Saara transaction data (sales, payments, expenses, purchases, salaries, drawings) clear karein?', { danger: true, yes: 'Clear karein' });
       if (!yes) return;
+      DataBackup.snapshot('pre-clear-transactions');
       Biz.clearTransactions();
       toast('Transactions clear ho gaye', 'warn');
       app.go('dashboard');
@@ -415,6 +537,7 @@ function settingsPaint() {
     $('#dzReset').onclick = async () => {
       const yes = await confirmDialog('POORA data delete ho jayega (backup liya hai?). Yeh undo nahi ho sakta.', { danger: true, yes: 'Sab kuch reset karein' });
       if (!yes) return;
+      DataBackup.snapshot('pre-reset');
       DB.resetAll();
       toast('Portal reset ho gaya', 'warn');
       setTimeout(() => location.reload(), 700);
