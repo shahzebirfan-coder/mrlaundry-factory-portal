@@ -135,6 +135,7 @@ const DB = {
       }
     });
     if (!Array.isArray(d.settings.categories) || !d.settings.categories.length) d.settings.categories = DEFAULT_CATEGORIES;
+    if (!d._tomb || typeof d._tomb !== 'object' || Array.isArray(d._tomb)) d._tomb = {};
     if (!d._counters) d._counters = { invoice: 1000 };
     if (d._counters.invoice == null) d._counters.invoice = 1000;
     // ensure built-in users still exist (passwords editable in Users page)
@@ -180,9 +181,22 @@ const DB = {
     const arr = this._data[tbl] || [];
     const i = arr.findIndex(r => r && r.id === id);
     if (i < 0) return false;
-    if (hard) arr.splice(i, 1);
-    else { arr[i]._deleted = true; arr[i].deletedAt = new Date().toISOString(); }
+    const at = new Date().toISOString();
+    if (hard) {
+      /* hard delete bhi yaad rakhein — warna doosre device se record wapis aa jata hai */
+      this.tombstone(tbl, id, at);
+      arr.splice(i, 1);
+    } else {
+      arr[i]._deleted = true; arr[i].deletedAt = at; arr[i].updatedAt = at;
+    }
     this.save();
+    return true;
+  },
+  /** delete ka nishan (cloud merge ke liye) */
+  tombstone(tbl, id, at) {
+    const t = this._data._tomb = this._data._tomb || {};
+    t[tbl] = t[tbl] || {};
+    t[tbl][id] = at || new Date().toISOString();
     return true;
   },
   settings() { return this._data.settings; },
