@@ -81,7 +81,7 @@ const DB = {
         { id: 'p_shoes', name: 'SHOES', category: 'A', inputType: 'kg', unitPrice: 320, active: true, createdAt: now,
           types: ['Junior Shoes', 'Sports Shoes', 'Man Shoes', 'CH Shoes'] }
       ],
-      sales: [], payments: [], expenses: [], purchases: [], vendors: [], vendorRequests: [],
+      sales: [], payments: [], adjustments: [], expenses: [], purchases: [], vendors: [], vendorRequests: [],
       employees: [], salaries: [], drawings: [], deliveries: [], auditLog: [],
       settings: Object.assign({
         shopName: 'Mr Laundry Factory',
@@ -117,7 +117,7 @@ const DB = {
     const seed = this._seed();
     const tables = ['users', 'branches', 'customers', 'products', 'sales', 'payments',
       'expenses', 'purchases', 'vendors', 'vendorRequests', 'employees', 'salaries', 'drawings',
-      'deliveries', 'auditLog'];
+      'deliveries', 'auditLog', 'adjustments'];
     tables.forEach(t => { if (!Array.isArray(d[t])) d[t] = seed[t]; });
     d.settings = Object.assign({}, seed.settings, d.settings || {});
     /* ⚠️ Cloud config (URL / Shop ID / ON-OFF) DEVICE-LEVEL hai — synced

@@ -49,6 +49,16 @@ const Biz = {
   /** All non-deleted sales */
   sales() { return DB.all('sales').filter(s => s.status !== 'cancelled'); },
   payments() { return DB.all('payments'); },
+  /** ⚖️ adjustments / write-off (disputed amount accounts se clear karne ka record) */
+  adjustments() { return DB.all('adjustments'); },
+  ADJ_TYPES: [
+    { id: 'writeoff', label: 'Disputed / Write-off — wasool nahi hona' },
+    { id: 'discount', label: 'Discount / riayat (customer ko chhoot)' },
+    { id: 'correction', label: 'Correction — ghalat entry theek ki' },
+    { id: 'rounding', label: 'Rounding — chhota sa farq' },
+    { id: 'opening', label: 'Opening / purana balance ka masla' }
+  ],
+  adjTypeLabel(id) { const t = (this.ADJ_TYPES || []).filter(x => x.id === id)[0]; return t ? t.label : (id || 'Adjustment'); },
   expenses() { return DB.all('expenses'); },
   salaries() { return DB.all('salaries'); },
   purchases() { return DB.all('purchases'); },
@@ -64,9 +74,11 @@ const Biz = {
       .sort((a, b) => String(a.entryDate).localeCompare(String(b.entryDate)) || String(a.invoiceNo).localeCompare(String(b.invoiceNo)));
     const pays = this.payments().filter(p => p.customerId === customerId)
       .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const adjs = this.adjustments().filter(a => a.customerId === customerId)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
-    // FIFO: payments pool pehle purane sale par lagta hai
-    let pool = pays.reduce((s, p) => s + num(p.amount), 0);
+    // FIFO: payments + ⚖️ adjustments (write-off) ka pool pehle purane bill par lagta hai
+    let pool = pays.reduce((s, p) => s + num(p.amount), 0) + adjs.reduce((s, a) => s + num(a.amount), 0);
     sales.forEach(s => {
       const amt = this.saleAmount(s);
       s._amount = amt;
@@ -91,6 +103,9 @@ const Biz = {
       piecesDelivered: sales.reduce((s, x) => s + num(x.deliveredPcs), 0),
       amount: round2(sales.reduce((s, x) => s + x._amount, 0)),
       paid: round2(pays.reduce((s, p) => s + num(p.amount), 0)),
+      adjusted: round2(adjs.reduce((s, a) => s + num(a.amount), 0)),
+      adjustedKg: round1(adjs.reduce((s, a) => s + (num(a.kg) || (num(a.rate) ? num(a.amount) / num(a.rate) : 0)), 0)),
+      adjustments: adjs,
       balance: round2(sales.reduce((s, x) => s + x._due, 0)),
       advance,
       kgPaid: 0, kgBalance: 0, rateMix: [], avgRate: 0
@@ -124,6 +139,7 @@ const Biz = {
     const events = [];
     sales.forEach(s => events.push({ d: s.entryDate, t: 'sale', s }));
     pays.forEach(p => events.push({ d: p.date, t: 'pay', p }));
+    adjs.forEach(a => events.push({ d: a.date, t: 'adj', a }));
     events.sort((a, b) => String(a.d).localeCompare(String(b.d)) || (a.t === 'sale' ? -1 : 1));
 
     events.forEach(e => {
@@ -136,6 +152,17 @@ const Biz = {
           date: s.entryDate, type: 'sale', ref: s.invoiceNo, kind: 'Wash Received',
           desc: this.saleLinesText(s), kgAdd: kg, kgCut: 0, amount: amt, rate: r,
           kgBal, amtBal, saleId: s.id, deliveryDate: s.deliveryDate || ''
+        });
+      } else if (e.t === 'adj') {
+        const a = e.a;
+        const amt = num(a.amount), r = num(a.rate) || rate;
+        const kgCut = amtBal > 0 ? round1(Math.min(kgBal, num(a.kg) || (r ? amt / r : 0))) : 0;
+        kgBal = round1(Math.max(0, kgBal - kgCut));
+        amtBal = round2(amtBal - amt);
+        rows.push({
+          date: a.date, type: 'adjustment', ref: a.no || 'ADJ', kind: a.reason || this.adjTypeLabel(a.type),
+          desc: a.note || '', kgAdd: 0, kgCut, amount: -amt, rate: r,
+          kgBal, amtBal, adjustmentId: a.id
         });
       } else {
         const p = e.p;
@@ -297,6 +324,7 @@ const Biz = {
     return this.sales().filter(s => s.deliveryDate && (s.status === 'delivered' || s.status === 'partial') && range.match(s.deliveryDate));
   },
   paymentsIn(range) { return this.payments().filter(p => range.match(p.date)); },
+  adjustmentsIn(range) { return this.adjustments().filter(a => range.match(a.date)); },
   expensesIn(range) { return this.expenses().filter(e => range.match(e.date)); },
   salariesIn(range) { return this.salaries().filter(e => range.match(e.date)); },
   purchasesIn(range) { return this.purchases().filter(e => range.match(e.date)); },
@@ -318,6 +346,76 @@ const Biz = {
   },
 
   /* ============================================================
+     ⚖️ ADJUSTMENT / WRITE-OFF — disputed amount accounts se clear
+     ============================================================ */
+  addAdjustment(opts) {
+    const o = opts || {};
+    const cid = o.customerId;
+    if (!cid) { toast('Pehle customer select karein', 'error'); return null; }
+    const acc = this.customerAccount(cid);
+    const due = this.dueSales(cid);
+    const r = num(o.rate) || (due.length ? (num(due[0].rate) || this.rate()) : ((acc.rateMix || [])[0] ? acc.rateMix[0].rate : this.rate())) || this.rate();
+    let amount = round2(num(o.amount));
+    let kg = round1(num(o.kg));
+    if (amount <= 0 && kg > 0) amount = round2(kg * r);
+    if (kg <= 0 && amount > 0) kg = r ? round1(amount / r) : 0;
+    if (amount <= 0) { toast('Amount 0 se zyada likhein', 'error'); return null; }
+    const counters = (DB._data._counters = DB._data._counters || {});
+    counters.adj = num(counters.adj) + 1;
+    const rec = {
+      id: uid('adj'), no: 'ADJ-' + String(counters.adj).padStart(4, '0'),
+      customerId: cid, date: o.date || todayISO(), type: o.type || 'writeoff',
+      amount, kg, rate: r,
+      reason: String(o.reason || '').trim(), note: String(o.note || '').trim(),
+      createdBy: (DB.currentUser() || {}).name || 'device'
+    };
+    DB.upsert('adjustments', rec);
+    DB.audit('adjustment', rec.no + ' — ' + this.customerName(cid) + ' — ' + fmtMoney(amount) + ' (' + fmtKg(kg) + ') · ' + (rec.reason || this.adjTypeLabel(rec.type)));
+    return rec;
+  },
+
+  /* ============================================================
+     🔍 AMOUNT FINDER — "yeh Rs. X kahan se aa raha hai?"
+     ============================================================ */
+  amountFinder(amountInput) {
+    const q = round2(num(amountInput));
+    const res = { q, singles: [], aggs: [], pairs: [], nearBalances: [] };
+    if (q <= 0) return res;
+    const near = v => Math.abs(num(v) - q) <= 1.0;
+
+    this.payments().forEach(p => { if (near(p.amount)) res.singles.push({ kind: 'payment', label: 'Payment ' + (p.no || ''), who: this.customerName(p.customerId), date: p.date, amount: num(p.amount), note: p.mode || '', customerId: p.customerId }); });
+    this.adjustments().forEach(a => { if (near(a.amount)) res.singles.push({ kind: 'adjustment', label: 'Adjustment ' + (a.no || ''), who: this.customerName(a.customerId), date: a.date, amount: num(a.amount), note: a.reason || this.adjTypeLabel(a.type), customerId: a.customerId }); });
+    this.expenses().forEach(e => { if (near(e.amount)) res.singles.push({ kind: 'expense', label: 'Expense — ' + (e.title || e.category || ''), who: '', date: e.date, amount: num(e.amount), note: e.note || '' }); });
+    this.purchases().forEach(x => { if (near(x.amount)) res.singles.push({ kind: 'purchase', label: 'Purchase' + (x.vendorId ? ' — ' + this.vendorName(x.vendorId) : ''), who: '', date: x.date, amount: num(x.amount), note: x.note || '' }); });
+    this.salaries().forEach(x => { if (near(x.amount)) res.singles.push({ kind: 'salary', label: 'Salary' + (x.employeeId ? ' — ' + this.employeeName(x.employeeId) : ''), who: '', date: x.date, amount: num(x.amount), note: x.note || '' }); });
+    this.drawings().forEach(x => { if (near(x.amount)) res.singles.push({ kind: 'drawing', label: 'Owner Drawing', who: '', date: x.date, amount: num(x.amount), note: x.note || '' }); });
+
+    DB.all('customers').forEach(c => {
+      const a = this.customerAccount(c.id);
+      const bills = a.saleRows || [];
+      bills.forEach(s => {
+        if (near(s._amount)) res.singles.push({ kind: 'bill', label: 'Bill ' + s.invoiceNo, who: c.name, date: s.entryDate, amount: s._amount, note: this.saleItemsSummary(s), customerId: c.id, saleId: s.id });
+        if (num(s._due) > 0.009 && near(s._due)) res.singles.push({ kind: 'bill-due', label: 'Bill ' + s.invoiceNo + ' — baqi (due)', who: c.name, date: s.entryDate, amount: s._due, note: this.saleItemsSummary(s), customerId: c.id, saleId: s.id });
+      });
+      [['balance', a.balance, 'Balance due', a.kgBalance], ['advance', a.advance, 'Advance jama', 0],
+       ['paid', a.paid, 'Total paid', a.kgPaid], ['amount', a.amount, 'Total billed', a.kgTotal],
+       ['adjusted', a.adjusted, 'Adjustments / write-off', a.adjustedKg]].forEach(t => {
+        if (num(t[1]) > 0 && near(t[1])) res.aggs.push({ kind: t[0], who: c.name, label: t[2], amount: num(t[1]), kg: num(t[3]), customerId: c.id });
+      });
+      if (num(a.balance) > 0.009) res.nearBalances.push({ who: c.name, balance: a.balance, kg: a.kgBalance, customerId: c.id, diff: Math.abs(num(a.balance) - q) });
+      const amts = bills.filter(s => num(s._amount) > 0).map(s => ({ label: 'Bill ' + s.invoiceNo, amount: s._amount, date: s.entryDate }));
+      for (let i = 0; i < amts.length; i++) for (let j = i + 1; j < amts.length; j++) {
+        if (Math.abs(round2(amts[i].amount + amts[j].amount) - q) <= 1.0) {
+          res.pairs.push({ who: c.name, customerId: c.id, parts: [amts[i], amts[j]], total: round2(amts[i].amount + amts[j].amount) });
+        }
+      }
+    });
+    res.nearBalances.sort((a, b) => a.diff - b.diff);
+    res.nearBalances = res.nearBalances.slice(0, 5);
+    return res;
+  },
+
+  /* ============================================================
      DASHBOARD METRICS for a period
      ============================================================ */
   metrics(range) {
@@ -334,8 +432,11 @@ const Biz = {
     const salaries = round2(this.salariesIn(r).reduce((a, e) => a + num(e.amount), 0));
     const purchases = round2(this.purchasesIn(r).reduce((a, e) => a + num(e.amount), 0));
     const drawings = round2(this.drawingsIn(r).reduce((a, e) => a + num(e.amount), 0));
+    const adjList = this.adjustmentsIn(r);
+    const adjustments = round2(adjList.reduce((a, e) => a + num(e.amount), 0));
+    const adjustedKg = round1(adjList.reduce((a, e) => a + (num(e.kg) || (num(e.rate) ? num(e.amount) / num(e.rate) : 0)), 0));
     const totalExpenses = round2(expenses + salaries + purchases);
-    const profit = round2(income - totalExpenses);
+    const profit = round2(income - totalExpenses - adjustments);
     const catKg = {};
     this.catKeys().forEach(k => catKg[k] = 0);
     sales.forEach(s => (s.lines || []).forEach(l => { catKg[l.category || 'A'] = round1((catKg[l.category || 'A'] || 0) + num(l.qtyKg)); }));
@@ -346,6 +447,7 @@ const Biz = {
       inFactoryKg: this.inFactoryKg(), inFactoryCount: this.inFactory().length, inFactoryPcs: this.inFactoryPieces(),
       pendingKg: this.inFactoryKg(),
       income, collected, expenses, salaries, purchases, drawings, totalExpenses, profit,
+      adjustments, adjustedKg, adjustmentsCount: adjList.length,
       avgRate: receivedKg > 0 ? round2(income / receivedKg) : 0,
       catKg,
       cashInHand: round2(collected - expenses - salaries - purchases - drawings)

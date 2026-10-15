@@ -646,13 +646,92 @@ const Cloud = {
       DataBackup.snapshot('pre-other-dataset');
       this._applyData(m.data, { snapshot: 'pre-other-dataset' });
       this._pendingPush = true;                       // ab yeh sab is shop par bhi chala jayega
-      toast('"' + other + '" ka data mila liya ✔ ' + this._mergeText(m.stats) + ' — ab "⬆️ Cloud par bhejein" dabayein', 'success', 7000);
+      toast('"' + other + '" ka data mila liya ✔ ' + this._mergeText(m.stats), 'success', 7000);
       this.updateDot();
+      setTimeout(() => { this.push(true).catch(() => {}); }, 700);   // khud bhi upload ho jaye
       return true;
     } catch (e) {
       toast('Milaya nahi ja saka: ' + e.message, 'error', 6000);
       return false;
     }
+  },
+
+  /* ============================================================
+     🔍 DATA FINDER — cloud par maujood SAB datasets ka khulasa
+     (gum-shuda data dhoondne ke liye: kis dataset mein kitne bills,
+      invoice number kis had tak, aakhri update kab)
+     ============================================================ */
+  _dsCounts(d) {
+    const live = o => (o || []).filter(r => r && !r._deleted);
+    const sales = live(d && d.sales);
+    const invs = sales.map(r => num(String(r.invoiceNo || '').replace(/\D/g, ''))).filter(Boolean);
+    return {
+      sales: sales.length,
+      customers: live(d && d.customers).length,
+      payments: live(d && d.payments).length,
+      products: live(d && d.products).length,
+      expenses: live(d && d.expenses).length,
+      kg: round1(sales.reduce((a, r) => a + num(r.kgTotal), 0)),
+      minInv: invs.length ? Math.min.apply(null, invs) : 0,
+      maxInv: invs.length ? Math.max.apply(null, invs) : 0,
+      updatedAt: (d && d._updatedAt) || '', by: (d && d._updatedBy) || ''
+    };
+  },
+
+  /** is device ka data ka khulasa */
+  localSummary() {
+    const c = this._dsCounts(DB._data);
+    return Object.assign(c, { shopId: this.shopId, lastSave: (DB._data || {})._updatedAt || '' });
+  },
+
+  /** cloud par har dataset (shop id) ka data — sab se ziyada invoice wala pehle */
+  async scanDatasets() {
+    if (!this.ready) return { ok: false, reason: 'Cloud ON nahi hai (Settings → Cloud Sync)' };
+    let shops = [];
+    try { shops = await this.listShops(); } catch (e) { return { ok: false, reason: e.message }; }
+    if (!shops.length) return { ok: true, list: [] };
+    const list = [];
+    for (let i = 0; i < shops.length; i++) {
+      const id = shops[i];
+      try {
+        const d = await this._fetchJSON(this.url + '/factories/' + encodeURIComponent(id) + '/data.json');
+        list.push(Object.assign(this._dsCounts(d), { shopId: id, current: id === this.shopId, ok: true }));
+      } catch (e) {
+        list.push({ shopId: id, current: id === this.shopId, ok: false, err: e.message });
+      }
+    }
+    list.sort((a, b) => (b.maxInv || 0) - (a.maxInv || 0) || (b.sales || 0) - (a.sales || 0));
+    return { ok: true, list };
+  },
+
+  /** kisi dataset ka poora JSON backup download (raw) */
+  async downloadDataset(id) {
+    id = this.cleanShopId(id);
+    try {
+      const d = await this._fetchJSON(this.url + '/factories/' + encodeURIComponent(id) + '/data.json');
+      if (!d) { toast('"' + id + '" mein kuch data nahi', 'warn'); return false; }
+      const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'mlf-dataset-' + id + '-' + todayISO() + '.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      toast('"' + id + '" ka backup download ho gaya ✔', 'success');
+      return true;
+    } catch (e) { toast('Download fail: ' + e.message, 'error', 5000); return false; }
+  },
+
+  /** us dataset par switch karein (Shop ID badal kar wahan se pull) — merge ke bajaye poori tarah */
+  async switchToShop(id) {
+    id = this.cleanShopId(id);
+    if (!id) return false;
+    this.setCfg({ shopId: id, shopLocked: true }, { quiet: true });
+    this.refresh();
+    this._didInitialPull = true;
+    await this.pull({ silent: true, force: true });
+    toast('Shop ID ab "' + id + '" (🔒 lock) — us dataset ka data mil gaya', 'success', 5000);
+    this.updateDot();
+    return true;
   },
 
   /** Sync Report ke liye: cloud par kya rakha hai */
