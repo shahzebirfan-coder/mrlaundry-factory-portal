@@ -212,7 +212,8 @@ function openCustomerProfile(id) {
              <button class="btn btn-ghost" id="cpEdit">✏️ Edit</button>
              <button class="btn btn-ghost" id="cpStatement">🖨️ Statement</button>
              <button class="btn btn-primary" id="cpNew">➕ New Wash Entry</button>
-             <button class="btn btn-success" id="cpPay">💵 Receive Payment</button>`
+             <button class="btn btn-success" id="cpPay">💵 Receive Payment</button>
+             <button class="btn btn-warn" id="cpAdj">⚖️ Adjustment / Write-off</button>`
   });
 
   function paintTab(t) {
@@ -251,7 +252,31 @@ function openCustomerProfile(id) {
           <td><button class="icon-btn" style="width:28px;height:28px;font-size:11px" data-dpay="${p.id}" title="Delete">🗑️</button></td>
         </tr>`).join('') : emptyRow(8, 'Koi payment record nahi', '💤')}</tbody>
         <tfoot><tr><td colspan="4">TOTAL</td><td class="t-right">${fmtMoney(acc.paid)}</td><td class="t-right">${fmtKg(acc.kgPaid)}</td><td colspan="2"></td></tr></tfoot>
-      </table></div>`;
+      </table></div>
+      ${(acc.adjustments || []).length ? `<div class="divider"></div>
+      <div class="row" style="justify-content:space-between;align-items:center"><b>⚖️ Adjustments / Write-off (${acc.adjustments.length})</b>
+        <span class="tiny muted">Total − ${fmtMoney(acc.adjusted)} (${fmtKg(acc.adjustedKg)})</span></div>
+      <div class="tbl-wrap"><table class="tbl" style="min-width:680px">
+        <thead><tr><th>Date</th><th>Voucher</th><th>Wajah</th><th class="t-right">Amount</th><th class="t-right">KG</th><th>Note</th><th></th></tr></thead>
+        <tbody>${acc.adjustments.slice().reverse().map(a => `<tr>
+          <td>${fmtDate(a.date)}</td><td class="tiny">${esc(a.no || '')}</td>
+          <td class="tiny">${esc(Biz.adjTypeLabel(a.type))}${a.reason ? ' — ' + esc(a.reason) : ''}</td>
+          <td class="t-right t-warn">− ${fmtMoney(a.amount)}</td>
+          <td class="t-right">${fmtKg(a.kg)}</td>
+          <td class="tiny">${esc(a.note || '')}</td>
+          <td><button class="icon-btn" style="width:28px;height:28px;font-size:11px" data-dadj="${a.id}" title="Delete">🗑️</button></td>
+        </tr>`).join('')}</tbody>
+        <tfoot><tr><td colspan="3">TOTAL</td><td class="t-right">− ${fmtMoney(acc.adjusted)}</td><td class="t-right">${fmtKg(acc.adjustedKg)}</td><td colspan="2"></td></tr></tfoot>
+      </table></div>` : ''}`;
+      $$('[data-dadj]', el2).forEach(b => b.onclick = async () => {
+        const a = DB.get('adjustments', b.dataset.dadj);
+        const yes = await confirmDialog('Adjustment ' + (a.no || '') + ' — ' + fmtMoney(a.amount) + ' delete karein?\n(records se hat jayega, balance wapis barh jayega)', { danger: true, yes: 'Delete' });
+        if (!yes) return;
+        DB.remove('adjustments', a.id);
+        DB.audit('adjustment-delete', (a.no || '') + ' delete — ' + c.name + ' — ' + fmtMoney(a.amount));
+        toast('Adjustment delete ho gaya', 'warn');
+        closeModal(w); openCustomerProfile(id);
+      });
       $$('[data-dpay]', el2).forEach(b => b.onclick = async () => {
         const p = DB.get('payments', b.dataset.dpay);
         const yes = await confirmDialog('Payment ' + fmtMoney(p.amount) + ' (' + fmtDate(p.date) + ') delete karni hai?', { danger: true, yes: 'Delete' });
@@ -272,6 +297,7 @@ function openCustomerProfile(id) {
   $('#cpEdit', w).onclick = async () => { closeModal(w); await customerForm(id); openCustomerProfile(id); };
   $('#cpNew', w).onclick = () => { closeModal(w); app.go('newsales?customer=' + id); };
   $('#cpPay', w).onclick = () => { closeModal(w); openPaymentForm(id); };
+  const cpAdj = $('#cpAdj', w); if (cpAdj) cpAdj.onclick = () => { closeModal(w); openAdjustmentForm(id); };
   $('#cpStatement', w).onclick = () => printCustomerStatement(id);
 }
 
@@ -296,7 +322,9 @@ function ledgerTableHTML(acc, opts) {
         <td class="tiny">${esc(r.ref || '—')}</td>
         <td>${r.type === 'sale'
       ? '<span class="pill pill-brand">Wash Received</span> <span class="tiny">' + esc(r.desc) + '</span>'
-      : '<span class="pill pill-ok">Payment</span> <span class="tiny">' + esc(r.desc || r.kind) + '</span>'}
+      : (r.type === 'adjustment'
+        ? '<span class="pill pill-warn">⚖️ Adjustment</span> <span class="tiny">' + esc(r.kind || 'Write-off') + (r.desc ? ' — ' + esc(r.desc) : '') + '</span>'
+        : '<span class="pill pill-ok">Payment</span> <span class="tiny">' + esc(r.desc || r.kind) + '</span>')}
           ${r.type === 'sale' && r.deliveryDate ? '<div class="tiny muted">Delivered: ' + fmtDate(r.deliveryDate) + '</div>' : ''}</td>
         <td class="t-right">${r.kgAdd ? fmtKg(r.kgAdd) : '—'}</td>
         <td class="t-right">${r.kgCut ? fmtKg(r.kgCut) : '—'}</td>
@@ -334,7 +362,9 @@ function printCustomerStatement(customerId, range) {
       <tbody>
         ${rows.map(r => `<tr>
           <td>${fmtDate(r.date)}</td><td>${esc(r.ref || '')}</td>
-          <td>${r.type === 'sale' ? 'Wash: ' + esc(r.desc) : 'Payment received ' + esc(r.desc || '')}</td>
+          <td>${r.type === 'sale' ? 'Wash: ' + esc(r.desc)
+            : (r.type === 'adjustment' ? '⚖️ Adjustment: ' + esc((r.kind || '') + (r.desc ? ' — ' + r.desc : ''))
+            : 'Payment received ' + esc(r.desc || ''))}</td>
           <td class="r">${r.kgAdd ? fmtNum(r.kgAdd, 1) : ''}</td>
           <td class="r">${r.kgCut ? fmtNum(r.kgCut, 1) : ''}</td>
           <td class="r"><b>${fmtNum(r.kgBal, 1)}</b></td>
@@ -346,6 +376,7 @@ function printCustomerStatement(customerId, range) {
       <tr><td>Total KG Received (all time)</td><td class="r"><b>${fmtKg(acc.kgTotal)}</b></td></tr>
       <tr><td>Total Billed</td><td class="r"><b>${fmtMoney(acc.amount)}</b></td></tr>
       <tr><td>Total Received (payments)</td><td class="r"><b>${fmtMoney(acc.paid)}</b></td></tr>
+      ${acc.adjusted > 0 ? `<tr><td>⚖️ Adjustments / Write-off (${fmtKg(acc.adjustedKg)})</td><td class="r"><b>(${fmtMoney(acc.adjusted)})</b></td></tr>` : ''}
       ${acc.advance > 0 ? `<tr><td>Advance / extra received</td><td class="r">${fmtMoney(acc.advance)}</td></tr>` : ''}
       <tr class="grand"><td>BALANCE DUE (${fmtKg(acc.kgBalance)})</td><td class="r">${fmtMoney(acc.balance)}</td></tr>
     </table>

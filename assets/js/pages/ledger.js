@@ -45,6 +45,24 @@ function ledgerPaint() {
     ${Period.bar()}
 
     <div class="card">
+      <div class="card-head"><h3>🔍 Amount Finder — "yeh Rs. kahan se aa raha hai?"</h3><div class="sp"></div></div>
+      <div class="card-body">
+        <div class="note-box info tiny mb10">
+          Koi raqam hisaab mein nazar aa rahi hai aur samajh nahi aa raha kahan se aayi? Yahan <b>amount likhein</b> (jaise <b>15980</b>) —
+          portal har jagah dhoond kar batayega: <b>bills, bill ka baqi (due), payments, adjustments, expenses, drawings, purchases, salaries</b>
+          aur <b>customer ke balance / advance</b> — aur <b>2 bills ka jama</b> bhi. Phir wahin se ⚖️ Adjustment kar ke accounts clear kar sakte hain.
+        </div>
+        <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <label class="fld mb0" style="width:190px"><span>Amount (Rs.)</span>
+            <input type="number" step="0.01" class="inp" id="afAmt" placeholder="15980"/></label>
+          <button class="btn btn-primary" id="afGo">🔍 Dhoondein</button>
+          <span class="tiny muted">Tip: disputed raqam customer ke ledger mein bhi ⚖️ button se clear ho jati hai.</span>
+        </div>
+        <div id="afOut" class="mt12"></div>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="card-head">
         <h3>📒 Payment Ledger</h3><div class="sp"></div>
         <select class="inp inp-sm" id="ldCust" style="width:240px">
@@ -55,7 +73,8 @@ function ledgerPaint() {
         <button class="btn btn-ghost btn-sm" id="ldWeek">🗓️ Weekly Invoice</button>
         <button class="btn btn-ghost btn-sm" id="ldStmt">🖨️ Statement</button>
         <button class="btn btn-ghost btn-sm" id="ldWa">💬 WhatsApp</button>
-        <button class="btn btn-success btn-sm" id="ldPay">💵 Receive Payment</button>` : ''}
+        <button class="btn btn-success btn-sm" id="ldPay">💵 Receive Payment</button>
+        <button class="btn btn-warn btn-sm" id="ldAdj">⚖️ Adjustment / Write-off</button>` : ''}
       </div>
       ${cid && acc ? `
       <div class="card-body tight">
@@ -70,6 +89,9 @@ function ledgerPaint() {
             <div class="big">${fmtMoney(acc.balance)}</div>
             <span class="tiny">${fmtKg(acc.kgTotal)} − ${fmtKg(acc.kgPaid)} = ${fmtKg(acc.kgBalance)}</span></div>
         </div>
+        ${acc.adjusted > 0 ? `<div class="note-box warn tiny mt10">
+          ⚖️ Is customer ke <b>${fmtMoney(acc.adjusted)}</b> (${fmtKg(acc.adjustedKg)}) <b>adjustment / write-off</b> ho chuke hain — yeh raqam accounts se clear hai
+          ${(acc.adjustments || []).length ? '(' + acc.adjustments.length + ' voucher, neeche ledger mein ⚖️ rows)' : ''}.</div>` : ''}
         ${acc.kgBalance > 0 ? `<div class="note-box warn tiny mt10">
           🔎 <b>Note:</b> ${esc(Biz.customerName(cid))} ne kul <b>${fmtKg(acc.kgTotal)}</b> wash karwaya hai,
           jis mein se <b>${fmtKg(acc.kgPaid)}</b> ka payment aa chuka hai. Baqi <b>${fmtKg(acc.kgBalance)}</b>
@@ -94,7 +116,8 @@ function ledgerPaint() {
             <td class="t-right ${x.a.balance > 0.009 ? 't-bad' : 't-ok'}"><b>${fmtMoney(x.a.balance)}</b></td>
             <td class="t-right">${fmtKg(x.a.kgBalance)}</td>
             <td class="t-right">${x.a.advance > 0 ? fmtMoney(x.a.advance) : '—'}</td>
-            <td class="t-center"><button class="icon-btn" style="width:28px;height:28px;font-size:11px" data-pay="${x.c.id}" title="Receive payment">💵</button></td>
+            <td class="t-center"><button class="icon-btn" style="width:28px;height:28px;font-size:11px" data-pay="${x.c.id}" title="Receive payment">💵</button>
+              <button class="icon-btn" style="width:28px;height:28px;font-size:11px" data-adj="${x.c.id}" title="Adjustment / write-off">⚖️</button></td>
           </tr>`).join('') : emptyRow(8, 'Sab customers clear hain — koi balance due nahi 🎉', '🎉')}</tbody>
           <tfoot><tr><td>TOTAL</td>
             <td class="t-right">${fmtKg(round1(dueList.reduce((a, x) => a + x.a.kgTotal, 0)))}</td>
@@ -110,6 +133,68 @@ function ledgerPaint() {
   Period.bind(el, ledgerPaint);
   const sel = $('#ldCust'); if (sel) sel.onchange = e => { LedgerUI.customerId = e.target.value; ledgerPaint(); };
   const pe = $('#ldPay'); if (pe) pe.onclick = () => openPaymentForm(cid);
+  const ad = $('#ldAdj'); if (ad) ad.onclick = () => openAdjustmentForm(cid);
+
+  /* ---- 🔍 Amount Finder ---- */
+  function afRows(list, cols) {
+    return list.map(x => '<tr>' + cols(x).join('') + '</tr>').join('');
+  }
+  function afPaint(q) {
+    const out = $('#afOut');
+    if (!out) return;
+    const r = Biz.amountFinder(q);
+    let html = '';
+    if (r.singles.length) {
+      html += `<div class="tiny" style="margin-bottom:6px"><b>${r.singles.length} record${r.singles.length > 1 ? 's' : ''} mein bilkul yehi raqam (Rs. ${fmtNum(r.q)})</b></div>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Kahan</th><th>Ref</th><th>Customer / Tafseel</th><th>Date</th><th class="t-right">Amount</th><th></th></tr></thead>
+        <tbody>${afRows(r.singles, x => [
+          '<td>' + ({ bill: '🧾 Bill', 'bill-due': '🧾 Bill ka BAQI', payment: '💵 Payment', adjustment: '⚖️ Adjustment', expense: '💸 Expense', purchase: '📦 Purchase', salary: '👷 Salary', drawing: '🏠 Drawing' }[x.kind] || x.kind) + '</td>',
+          '<td class="tiny">' + esc(x.label || '') + '</td>',
+          '<td class="tiny">' + esc(x.who || '') + (x.note ? ' <span class="muted">· ' + esc(x.note) + '</span>' : '') + '</td>',
+          '<td class="tiny">' + fmtDate(x.date) + '</td>',
+          '<td class="t-right t-strong">' + fmtMoney(x.amount) + '</td>',
+          '<td>' + (x.customerId ? '<button class="btn btn-ghost btn-xs" data-afledger="' + x.customerId + '">📒 Ledger</button> <button class="btn btn-warn btn-xs" data-afadj="' + x.customerId + '" data-afamt="' + x.amount + '">⚖️ Clear</button>' : '') + '</td>'
+        ])}</tbody></table></div>`;
+    }
+    if (r.aggs.length) {
+      html += `<div class="tiny" style="margin:10px 0 6px"><b>Customer ke total (aggregate) mein yehi raqam</b></div>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Customer</th><th>Kya cheez</th><th class="t-right">Amount</th><th class="t-right">KG</th><th></th></tr></thead>
+        <tbody>${afRows(r.aggs, x => ['<td class="t-strong">' + esc(x.who) + '</td>', '<td class="tiny">' + esc(x.label) + '</td>',
+          '<td class="t-right t-strong">' + fmtMoney(x.amount) + '</td>', '<td class="t-right">' + (x.kg ? fmtKg(x.kg) : '—') + '</td>',
+          '<td><button class="btn btn-ghost btn-xs" data-afledger="' + x.customerId + '">📒 Ledger</button> <button class="btn btn-warn btn-xs" data-afadj="' + x.customerId + '" data-afamt="' + x.amount + '">⚖️ Clear</button></td>'])}</tbody></table></div>`;
+    }
+    if (r.pairs.length) {
+      html += `<div class="tiny" style="margin:10px 0 6px"><b>2 bills mil kar = Rs. ${fmtNum(r.q)}</b></div>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Customer</th><th>Bill 1</th><th>Bill 2</th><th class="t-right">Jama</th><th></th></tr></thead>
+        <tbody>${afRows(r.pairs, x => ['<td class="t-strong">' + esc(x.who) + '</td>',
+          '<td class="tiny">' + esc(x.parts[0].label) + ' — ' + fmtMoney(x.parts[0].amount) + '</td>',
+          '<td class="tiny">' + esc(x.parts[1].label) + ' — ' + fmtMoney(x.parts[1].amount) + '</td>',
+          '<td class="t-right t-strong">' + fmtMoney(x.total) + '</td>',
+          '<td><button class="btn btn-ghost btn-xs" data-afledger="' + x.customerId + '">📒 Ledger</button></td>'])}</tbody></table></div>`;
+    }
+    if (!r.singles.length && !r.aggs.length && !r.pairs.length) {
+      html += `<div class="note-box warn tiny">Rs. ${fmtNum(r.q)} ka koi aik record ya jama nahi mila. Neeche sab se <b>qareeb</b> balances dekh lein — ho sakta hai yeh kisi balance ka <b>hissa</b> ho.</div>`;
+    }
+    if (r.nearBalances.length) {
+      html += `<div class="tiny" style="margin:10px 0 6px"><b>Sab se qareeb customer balances</b></div>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Customer</th><th class="t-right">Balance</th><th class="t-right">KG</th><th class="t-right">Farq</th><th></th></tr></thead>
+        <tbody>${afRows(r.nearBalances, x => ['<td class="t-strong">' + esc(x.who) + '</td>',
+          '<td class="t-right t-bad">' + fmtMoney(x.balance) + '</td>', '<td class="t-right">' + fmtKg(x.kg) + '</td>',
+          '<td class="t-right tiny">' + fmtMoney(x.diff) + '</td>',
+          '<td><button class="btn btn-ghost btn-xs" data-afledger="' + x.customerId + '">📒 Ledger</button> <button class="btn btn-warn btn-xs" data-afadj="' + x.customerId + '" data-afamt="' + x.balance + '">⚖️ Clear</button></td>'])}</tbody></table></div>`;
+    }
+    out.innerHTML = html;
+    $$('[data-afledger]', out).forEach(b => b.onclick = () => { LedgerUI.customerId = b.dataset.afledger; ledgerPaint(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+    $$('[data-afadj]', out).forEach(b => b.onclick = () => openAdjustmentForm(b.dataset.afadj, { amount: num(b.dataset.afamt) }));
+  }
+  const afGo = $('#afGo');
+  if (afGo) afGo.onclick = () => {
+    const q = num($('#afAmt').value);
+    if (!q) { toast('Pehle amount likhein', 'error'); return; }
+    afPaint(q);
+  };
+  const afAmt = $('#afAmt');
+  if (afAmt) afAmt.onkeydown = e => { if (e.key === 'Enter') afGo.click(); };
   const ex = $('#ldExport'); if (ex) ex.onclick = () => exportCSV('ledger-' + DB.get('customers', cid).name.replace(/\s+/g, '-') + '.csv',
     ['Date', 'Type', 'Ref', 'Details', 'KG +', 'KG -', 'Balance KG', 'Amount', 'Balance'],
     acc.ledger.map(r => [r.date, r.type, r.ref, r.desc, r.kgAdd, r.kgCut, r.kgBal, r.amount, r.amtBal]));
@@ -124,6 +209,7 @@ function ledgerPaint() {
     toast('WhatsApp khul raha hai…', 'info');
   };
   $$('[data-pay]', el).forEach(b => b.onclick = () => openPaymentForm(b.dataset.pay));
+  $$('[data-adj]', el).forEach(b => b.onclick = () => openAdjustmentForm(b.dataset.adj));
   $('#recvExport').onclick = () => exportCSV('receivables-' + todayISO() + '.csv',
     ['Customer', 'Phone', 'Total KG', 'Billed', 'Paid', 'Balance', 'Balance KG', 'Advance'],
     dueList.map(x => [x.c.name, x.c.phone, x.a.kgTotal, x.a.amount, x.a.paid, x.a.balance, x.a.kgBalance, x.a.advance]));
@@ -484,4 +570,153 @@ function openWeeklyInvoice(customerId) {
   };
   $('#wkPrint', w).onclick = () => doPrint('a4');
   $('#wkThermal', w).onclick = () => doPrint('thermal');
+}
+
+
+/* ============================================================
+   ⚖️ ADJUSTMENT / WRITE-OFF — disputed raqam accounts se clear
+   ============================================================ */
+function openAdjustmentForm(customerId, opts) {
+  const o = opts || {};
+  const cid = customerId || LedgerUI.customerId;
+  if (!cid) { toast('Pehle customer select karein', 'error'); return; }
+  const c = DB.get('customers', cid);
+  if (!c) { toast('Customer nahi mila', 'error'); return; }
+  const acc = Biz.customerAccount(cid);
+  const dueList = (Biz.dueSales ? Biz.dueSales(cid) : []);
+  const defRate = num(o.rate) || (dueList.length ? (num(dueList[0].rate) || Biz.rate()) : (((acc.rateMix || [])[0] || {}).rate || Biz.rate()));
+  const preAmt = num(o.amount) || round2(acc.balance);
+
+  const body = `
+    <div class="note-box warn tiny mb10">
+      <b>⚖️ Adjustment / Write-off</b> — jo raqam <b>dispute / ghalti / riayat</b> ki wajah se wasool nahi honi,
+      usse yahan se <b>accounts se clear</b> karein. Yeh record ledger mein <b>hamesha nazar rahega</b>
+      (silent delete nahi hota) — is liye hisaab saaf bhi rehta hai aur proof bhi.<br>
+      <b>${esc(c.name)}</b> · Total billed <b>${fmtMoney(acc.amount)}</b> · Received <b>${fmtMoney(acc.paid)}</b>
+      ${acc.adjusted > 0 ? ' · Pehle adjustments <b>' + fmtMoney(acc.adjusted) + '</b>' : ''}
+      · <b class="${acc.balance > 0.009 ? 't-bad' : 't-ok'}">Balance: ${fmtMoney(acc.balance)} (${fmtKg(acc.kgBalance)})</b>
+    </div>
+
+    <div class="grid g3">
+      <label class="fld mb0"><span>Date</span><input type="date" class="inp" id="ajDate" value="${todayISO()}"/></label>
+      <label class="fld mb0"><span>Wajah (kis qism ka adjustment)</span><select class="inp" id="ajType">
+        ${Biz.ADJ_TYPES.map(t => `<option value="${t.id}">${esc(t.label)}</option>`).join('')}
+      </select></label>
+      <label class="fld mb0"><span>Rate (KG hisaab)</span><input type="number" step="0.01" class="inp" id="ajRate" value="${round2(defRate)}"/></label>
+    </div>
+    <div class="grid g3 mt10">
+      <label class="fld mb0"><span>Amount (Rs.) *</span><input type="number" step="0.01" class="inp" id="ajAmt" value="${preAmt}"/></label>
+      <label class="fld mb0"><span>KG (khud calculate)</span><input type="number" step="0.1" class="inp" id="ajKg" value=""/></label>
+      <label class="fld mb0"><span>Reason (detail)</span><input class="inp" id="ajReason" placeholder="jaise: disputed — customer mana kar raha hai"/></label>
+    </div>
+    <label class="fld mt10"><span>Note (optional)</span><input class="inp" id="ajNote" placeholder="jaise: INV-1021 ka farq, owner ki manzoori se"/></label>
+
+    <div class="row mt10" style="gap:8px;flex-wrap:wrap">
+      <button class="btn btn-ghost btn-sm" id="ajFull">Poora balance (${fmtMoney(acc.balance)})</button>
+      <button class="btn btn-ghost btn-sm" id="ajKgFull">Poori KG (${fmtKg(acc.kgBalance)})</button>
+      ${acc.advance > 0 ? `<button class="btn btn-ghost btn-sm" id="ajAdv">Advance bhi khatam karein (${fmtMoney(acc.advance)})</button>` : ''}
+    </div>
+    <div class="note-box info tiny mt12" id="ajPrev"></div>`;
+
+  const w = openModal({
+    title: '⚖️ Adjustment / Write-off — ' + c.name, size: 'lg', body,
+    footer: `<button class="btn btn-ghost" data-close="1">Cancel</button>
+             <button class="btn btn-warn" id="ajSave">⚖️ Save (accounts se clear)</button>
+             <button class="btn btn-primary" id="ajSavePrint">🖨️ Save + Voucher Print</button>`
+  });
+
+  function pv() {
+    const amt = round2(num($('#ajAmt', w).value));
+    const kg = round1(num($('#ajKg', w).value));
+    const r = num($('#ajRate', w).value) || defRate;
+    const box = $('#ajPrev', w);
+    if (!box) return;
+    if (amt <= 0) { box.innerHTML = 'Amount likhne par yahan naya hisaab nazar aayega.'; return; }
+    const newBal = round2(acc.balance - amt);
+    const newKg = round1(acc.kgBalance - (kg || (r ? amt / r : 0)));
+    const extra = amt > acc.balance + 0.5;
+    box.innerHTML = 'Is adjustment ke baad → <b>Balance: ' + fmtMoney(newBal) + '</b> ('
+      + fmtKg(Math.max(0, newKg)) + ')' + (kg ? ' · KG: ' + fmtKg(kg) + ' @ ' + fmtMoney(r) + '/kg' : '')
+      + (extra ? '<br><span class="t-bad">⚠️ Yeh balance se <b>' + fmtMoney(round2(amt - acc.balance)) + '</b> zyada hai — customer ke paas <b>advance</b> ban jayega.</span>' : '');
+  }
+  function syncFromAmount() {
+    const r = num($('#ajRate', w).value) || defRate;
+    const amt = round2(num($('#ajAmt', w).value));
+    $('#ajKg', w).value = r ? round1(amt / r) : '';
+    pv();
+  }
+  function syncFromKg() { pv(); }
+
+  ['#ajAmt', '#ajRate', '#ajDate', '#ajType', '#ajReason', '#ajNote'].forEach(sel => {
+    const el0 = $(sel, w);
+    if (el0) { el0.oninput = syncFromAmount; el0.onchange = syncFromAmount; }
+  });
+  const kgEl = $('#ajKg', w); if (kgEl) kgEl.oninput = syncFromKg;
+  const full = $('#ajFull', w); if (full) full.onclick = () => { $('#ajAmt', w).value = round2(acc.balance); $('#ajType', w).value = 'writeoff'; syncFromAmount(); };
+  const fullKg = $('#ajKgFull', w); if (fullKg) fullKg.onclick = () => { $('#ajAmt', w).value = round2(acc.balance); $('#ajKg', w).value = round1(acc.kgBalance); pv(); };
+  const adv = $('#ajAdv', w); if (adv) adv.onclick = () => { $('#ajAmt', w).value = round2(acc.balance + acc.advance); $('#ajType', w).value = 'correction'; syncFromAmount(); };
+  syncFromAmount();
+
+  async function save(andPrint) {
+    const amt = round2(num($('#ajAmt', w).value));
+    const kg = round1(num($('#ajKg', w).value));
+    const reason = String($('#ajReason', w).value || '').trim();
+    const typ = $('#ajType', w).value;
+    if (amt <= 0) { toast('Amount 0 se zyada likhein', 'error'); return; }
+    if (amt > acc.balance + 0.5) {
+      const yes = await confirmDialog('Yeh raqam balance (' + fmtMoney(acc.balance) + ') se zyada hai — customer ke paas '
+        + fmtMoney(round2(amt - acc.balance)) + ' ka advance ban jayega.\\nPhir bhi save karein?', { yes: 'Save karein' });
+      if (!yes) return;
+    }
+    if (!reason && typ === 'writeoff') {
+      const yes = await confirmDialog('Reason khali hai. Disputed / write-off ke liye wajah likhna behtar hai.\\nPhir bhi save karein?', { yes: 'Save karein' });
+      if (!yes) return;
+    }
+    const rec = Biz.addAdjustment({
+      customerId: cid, date: $('#ajDate', w).value || todayISO(), type: typ,
+      amount: amt, kg: kg, rate: num($('#ajRate', w).value) || defRate, reason, note: $('#ajNote', w).value || ''
+    });
+    if (!rec) return;
+    closeModal(w);
+    toast('⚖️ ' + rec.no + ' save — ' + fmtMoney(rec.amount) + ' (' + fmtKg(rec.kg) + ') accounts se clear ✔', 'success', 5000);
+    if (andPrint) printAdjustmentVoucher(rec.id);
+    LedgerUI.customerId = cid;
+    if (typeof ledgerPaint === 'function' && document.getElementById('ledBody')) ledgerPaint();
+    else app.go(app.current || 'ledger');
+  }
+  $('#ajSave', w).onclick = () => save(false);
+  $('#ajSavePrint', w).onclick = () => save(true);
+}
+
+/** ⚖️ Adjustment voucher (thermal / receipt paper) */
+function printAdjustmentVoucher(adjId) {
+  const a = DB.get('adjustments', adjId);
+  if (!a) { toast('Adjustment nahi mila', 'error'); return; }
+  const shop = DB.settings();
+  const acc = Biz.customerAccount(a.customerId);
+  const c = DB.get('customers', a.customerId) || {};
+  const paper = printSizeFor('receipt');
+  const body = `
+    ${printSlipHeader(shop, 'ADJUSTMENT VOUCHER')}
+    <div class="pr-title">ADJUSTMENT VOUCHER</div>
+    <div class="pr-meta">
+      <div><b>${esc(c.name || '')}</b><br>${esc(c.phone || '')}</div>
+      <div style="text-align:right">Voucher No: <b>${esc(a.no || '')}</b><br>Date: <b>${fmtDate(a.date)}</b><br>
+        Qism: <b>${esc(Biz.adjTypeLabel(a.type))}</b></div>
+    </div>
+    <table class="pr-tot">
+      <tr><td>Adjustment Amount (accounts se clear)</td><td class="r"><b>${fmtMoney(a.amount)}</b></td></tr>
+      <tr><td>Equivalent KG @ ${fmtMoney(a.rate || Biz.rate())}/kg</td><td class="r"><b>${fmtKg(a.kg)}</b></td></tr>
+      ${a.reason ? `<tr><td>Wajah</td><td class="r">${esc(a.reason)}</td></tr>` : ''}
+      ${a.note ? `<tr><td>Note</td><td class="r">${esc(a.note)}</td></tr>` : ''}
+      <tr><td>Total Wash Received (all time)</td><td class="r">${fmtKg(acc.kgTotal)}</td></tr>
+      <tr><td>Total Billed</td><td class="r">${fmtMoney(acc.amount)}</td></tr>
+      <tr><td>Received (payments)</td><td class="r">${fmtMoney(acc.paid)}</td></tr>
+      <tr><td>Adjustments (total)</td><td class="r">${fmtMoney(acc.adjusted)}</td></tr>
+      <tr class="grand"><td>NEW BALANCE DUE (${fmtKg(acc.kgBalance)})</td><td class="r">${fmtMoney(acc.balance)}</td></tr>
+    </table>
+    <div class="words">Amount in words: <b>${esc(amountInWords(a.amount))}</b></div>
+    <div class="pr-foot"><div class="small">Yeh voucher hisaab ki kitabon mein record hai (banane wala: ${esc(a.createdBy || '')}).</div>
+      <div class="sign">Approved By</div></div>`;
+  printHTML('Adjustment ' + (a.no || ''), body, { size: paper });
 }

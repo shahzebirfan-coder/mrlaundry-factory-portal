@@ -61,6 +61,7 @@ function dashPaint() {
         <div class="kv"><span>− Factory Expenses</span><b class="t-bad">${fmtMoney(m.expenses)}</b></div>
         <div class="kv"><span>− Purchases from Vendors</span><b class="t-bad">${fmtMoney(m.purchases)}</b></div>
         <div class="kv"><span>− Staff Salaries</span><b class="t-bad">${fmtMoney(m.salaries)}</b></div>
+        ${m.adjustments > 0 ? `<div class="kv"><span>− Adjustments / Write-off (disputed)</span><b class="t-bad">${fmtMoney(m.adjustments)}</b> <span class="tiny muted">(${fmtKg(m.adjustedKg)})</span></div>` : ''}
         <div class="kv total"><span>${m.profit >= 0 ? '= Net Profit ✅' : '= Net Loss ⚠️'}</span>
           <b class="${m.profit >= 0 ? 't-ok' : 't-bad'}">${fmtMoney(m.profit)}</b></div>
         <div class="divider"></div>
@@ -179,7 +180,26 @@ function dashPaint() {
       </div>
     </div>`;
 
+  /* 🚨 khaas warning: is device par data hi nahi — purana data kahin aur pada ho sakta hai */
+  let emptyWarn = '';
+  try {
+    if (typeof Cloud !== 'undefined' && Cloud.localIsEmpty && Cloud.localIsEmpty() && !Biz.sales().length && !Biz.payments().length) {
+      emptyWarn = `<div class="note-box bad mb10" style="line-height:1.8">
+        🚨 <b>Is device par abhi koi data nahi hai.</b>
+        Portal har browser mein apna data alag rakhta hai — is liye nayi files link karne se purana data delete nahi hota,
+        lekin naye browser / naye link par khud bhi nazar nahi aata.<br>
+        <b>Aap ka purana data dhoondne ke liye:</b> (1) usi computer + usi browser + <b>usi purane link</b> se portal kholein jahan kal kaam hua tha,
+        ya (2) neeche wala button dabayein — 🛟 <b>Data Finder</b> cloud ke sab datasets (purani shop id) scan kar ke batata hai kis mein kitne bills hain,
+        phir aik click mein sab wapis mila deta hai.
+        <div class="row" style="gap:8px;margin-top:8px">
+          <button class="btn btn-primary btn-sm" data-emptyfinder="1">🔍 Data Finder kholein</button>
+          <button class="btn btn-ghost btn-sm" data-emptypush="1">⬆️ Is device ka data cloud par bhejein</button>
+        </div></div>`;
+    }
+  } catch (e) { /* ignore */ }
+
   el.innerHTML = `
+    ${emptyWarn}
     ${Period.bar()}
     ${cards}
     <div class="grid g-2-1">
@@ -188,6 +208,8 @@ function dashPaint() {
     </div>`;
 
   const dr = $('#dashRate', el); if (dr) dr.onclick = () => openRateForm();
+  const ef = $('[data-emptyfinder]', el); if (ef) ef.onclick = () => { SetUI.tab = 'backup'; app.go('settings'); };
+  const ep = $('[data-emptypush]', el); if (ep) ep.onclick = async () => { await Cloud.forcePush(); };
   Period.bind(el, dashPaint);
   $$('[data-goto]', el).forEach(b => b.onclick = () => app.go(b.dataset.goto));
   $$('[data-deliver]', el).forEach(b => b.onclick = () => openDeliveryForm(b.dataset.deliver));

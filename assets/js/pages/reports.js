@@ -57,6 +57,7 @@ function reportsPaint() {
             <div class="kv"><span>− Factory Expenses</span><b class="t-bad">${fmtMoney(m.expenses)}</b></div>
             <div class="kv"><span>− Purchases</span><b class="t-bad">${fmtMoney(m.purchases)}</b></div>
             <div class="kv"><span>− Salaries</span><b class="t-bad">${fmtMoney(m.salaries)}</b></div>
+            ${m.adjustments > 0 ? `<div class="kv"><span>− Adjustments / Write-off (disputed)</span><b class="t-bad">${fmtMoney(m.adjustments)}</b> <span class="tiny muted">(${fmtKg(m.adjustedKg)})</span></div>` : ''}
             <div class="kv total"><span>Net ${m.profit >= 0 ? 'Profit' : 'Loss'}</span><b class="${m.profit >= 0 ? 't-ok' : 't-bad'}">${fmtMoney(m.profit)}</b></div>
             <div class="kv"><span>Profit per KG</span><b>${fmtMoney(m.receivedKg ? round2(m.profit / m.receivedKg) : 0)}</b></div>
             <div class="kv"><span>Owner Drawings (cash out, not expense)</span><b>${fmtMoney(m.drawings)}</b></div>

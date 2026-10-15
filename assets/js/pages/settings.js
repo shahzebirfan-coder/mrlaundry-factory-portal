@@ -456,6 +456,21 @@ function settingsPaint() {
         </div>
       </div>
 
+      <div class="card" id="dfCard">
+        <div class="card-head"><h3>🔍 Data Finder — mera data kahan hai?</h3><div class="sp"></div>
+          <button class="btn btn-primary btn-sm" id="dfScan">🔍 Sab jagah scan karein</button></div>
+        <div class="card-body">
+          <div class="note-box info tiny mb10">
+            <b>Data files mein nahi hota</b> — yeh portal har browser mein apna data alag rakhta hai (aur cloud par bhejne par Firebase mein).
+            Is liye "nayi files" lagane se purana data <b>delete nahi hota</b>, lekin naye link / naye browser mein khud bhi nazar nahi aata.
+            Neeche scan kar ke dekhein — aap ka data kahan pada hai (kitne bills, invoice number kis had tak).
+          </div>
+          <div class="kv"><span><b>Is device par abhi</b> (Shop: ${esc(Cloud.shopId || '—')})</span><b id="dfLocal" class="tiny">…</b></div>
+          <div class="divider"></div>
+          <div class="tiny" id="dfCloud" style="line-height:1.7">Cloud par data dekhne ke liye <b>🔍 Sab jagah scan karein</b> dabayein (Cloud Sync ON hona chahiye).</div>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-head"><h3>⚠️ Danger Zone</h3></div>
         <div class="card-body row" style="gap:10px;justify-content:space-between">
@@ -463,6 +478,64 @@ function settingsPaint() {
           <button class="btn btn-danger" id="dzReset">🗑️ Reset Everything</button>
         </div>
       </div>`;
+
+    /* ---- 🔍 Data Finder ---- */
+    const dfPaintLocal = () => {
+      const box = $('#dfLocal', pane);
+      if (!box) return;
+      const c = Cloud.localSummary();
+      box.innerHTML = 'Bills: <b>' + fmtNum(c.sales) + '</b>' + (c.maxInv ? ' (INV ' + fmtNum(c.minInv) + '–' + fmtNum(c.maxInv) + ')' : '') +
+        ' · Customers: <b>' + fmtNum(c.customers) + '</b> · Payments: <b>' + fmtNum(c.payments) + '</b> · KG: <b>' + fmtKg(c.kg) + '</b>' +
+        (c.lastSave ? ' · <span class="muted">last save ' + new Date(c.lastSave).toLocaleString() + '</span>' : '');
+    };
+    dfPaintLocal();
+    const dfPaintCloud = (r) => {
+      const box = $('#dfCloud', pane);
+      if (!box) return;
+      if (!r.ok) { box.innerHTML = '<span class="t-warn">' + esc(r.reason || 'scan nahi ho saka') + '</span>'; return; }
+      if (!r.list.length) {
+        box.innerHTML = '<span class="t-warn">Cloud par koi dataset nahi mila — abhi tak kuch upload nahi hua. ' +
+          'Settings → Cloud Sync → <b>⬆️ Cloud par bhejein</b> dabayein.</span>';
+        return;
+      }
+      box.innerHTML = '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Dataset (Shop ID)</th><th class="t-right">Bills</th>' +
+        '<th class="t-right">Invoice No.</th><th class="t-right">Customers</th><th class="t-right">KG</th><th>Aakhri update</th><th></th></tr></thead><tbody>' +
+        r.list.map(x => ('<tr><td><b>' + esc(x.shopId) + '</b>' + (x.current ? ' <span class="pill pill-ok tiny">yeh chal raha hai ✓</span>' : '') + '</td>' +
+          (x.ok ? '<td class="t-right">' + fmtNum(x.sales) + '</td>' +
+            '<td class="t-right">' + (x.maxInv ? fmtNum(x.minInv) + '–' + fmtNum(x.maxInv) : '—') + '</td>' +
+            '<td class="t-right">' + fmtNum(x.customers) + '</td><td class="t-right">' + fmtKg(x.kg) + '</td>' +
+            '<td class="tiny">' + (x.updatedAt ? new Date(x.updatedAt).toLocaleString() + '<br><span class="muted">' + esc(x.by || '—') + '</span>' : '—') + '</td>' :
+            '<td colspan="5" class="t-warn tiny">' + esc(x.err || 'khulasa nahi mila') + '</td>') +
+          '<td class="t-right" style="white-space:nowrap">' +
+          (x.current ? '<span class="tiny muted">—</span>' :
+            '<button class="btn btn-primary btn-xs" data-dfmerge="' + esc(x.shopId) + '" title="Is dataset ka data is device ke data ke sath MILA dein (kuch delete nahi hota)">🔀 Milayein</button> ' +
+            '<button class="btn btn-ghost btn-xs" data-dfswitch="' + esc(x.shopId) + '" title="Isi dataset par chale jayein (Shop ID badal kar)">🔁 Isi par jayein</button> ') +
+          '<button class="btn btn-ghost btn-xs" data-dfdown="' + esc(x.shopId) + '" title="Poora JSON download">⬇️</button></td></tr>')).join('') +
+        '</tbody></table></div>' +
+        '<div class="tiny muted" style="margin-top:6px">🔀 <b>Milayein</b> = purana + naya data sath (safe) · 🔁 <b>Isi par jayein</b> = Shop ID usi par set ho jayegi · ⬇️ = us dataset ka backup file.</div>';
+      $$('[data-dfmerge]', box).forEach(b => b.onclick = async () => {
+        const id = b.dataset.dfmerge;
+        toast('"' + id + '" se data milaya ja raha hai…', 'info', 2000);
+        const ok = await Cloud.mergeFromShop(id);
+        if (ok) { dfPaintLocal(); dfPaintCloud(await Cloud.scanDatasets()); }
+      });
+      $$('[data-dfswitch]', box).forEach(b => b.onclick = async () => {
+        const id = b.dataset.dfswitch;
+        const yes = await confirmDialog('Shop ID "' + id + '" par shift karein?\n(is device ka maujooda data wahin jayega — pehle uska snapshot khud ban jayega)', { yes: 'Shift karein' });
+        if (!yes) return;
+        DataBackup.snapshot('pre-shop-switch');
+        await Cloud.switchToShop(id);
+        settingsPaint();
+      });
+      $$('[data-dfdown]', box).forEach(b => b.onclick = () => Cloud.downloadDataset(b.dataset.dfdown));
+    };
+    $('#dfScan').onclick = async () => {
+      const box = $('#dfCloud', pane);
+      if (box) box.innerHTML = '⏳ scan ho raha hai…';
+      dfPaintCloud(await Cloud.scanDatasets());
+      dfPaintLocal();
+    };
+    if (Cloud.ready) { $('#dfScan').click(); } else { dfPaintLocal(); }
 
     /* ---- Safety snapshots list ---- */
     function snPaint() {
