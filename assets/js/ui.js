@@ -4,28 +4,24 @@
    ============================================================ */
 
 const NAV = [
-  { sec: 'Operations' },
-  { id: 'dashboard', label: 'Dashboard', icon: '📊', sub: 'Live business summary' },
-  { id: 'newsales', label: 'New Sales', icon: '➕', sub: 'Per-KG wash slip banana' },
-  { id: 'sales', label: 'Order Invoices / Sales', icon: '🧾', sub: 'Saari entries, delivery & billing', badge: 'inFactory' },
-  { id: 'delivery', label: 'Delivery Queue', icon: '🚚', sub: 'Factory mein jo kapre hain' },
+  { id: 'dashboard', label: 'Dashboard', icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>', sub: 'Live business summary' },
+  { id: 'newsales', label: 'New Sales', icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>', sub: 'Per-KG wash slip banana' },
+  { id: 'sales', label: 'Order Invoices', icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>', sub: 'Saari entries, delivery & billing', badge: 'inFactory' },
+  { id: 'delivery', label: 'Delivery Queue', icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>', sub: 'Factory mein jo kapre hain' },
+  { id: 'customers', label: 'Customers', icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>', sub: 'Vendor / client accounts' },
+  { id: 'ledger', label: 'Payment Ledger', icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>', sub: 'Payment, kg balance, statement' },
+  { id: 'products', label: 'Products', icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>', sub: 'Wash items list' },
+  { id: 'expenses', label: 'Expenses', icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>', sub: 'Factory ke rozmarra kharchay' },
+  { id: 'purchases', label: 'Purchases', icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>', sub: 'Bahir se kharida gaya maal' },
+  { id: 'vendorlist', label: 'Vendors', icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>', sub: 'Vendors aur unki requirements' },
+  { id: 'employees', label: 'Employees', icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>', sub: 'Factory staff aur salary payments' },
+  { id: 'drawings', label: 'Owner', icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>', sub: 'Owner ka nikaal / personal use' },
+  { id: 'logout', label: 'Logout', icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>', sub: 'Portal se nikalna' },
 
-  { sec: 'Clients & Money' },
-  { id: 'customers', label: 'Customers', icon: '👥', sub: 'Vendor / client accounts' },
-  { id: 'ledger', label: 'Payment Ledger', icon: '📒', sub: 'Payment, kg balance, statement' },
-
-  { sec: 'Business' },
-  { id: 'products', label: 'Products', icon: '🧺', sub: 'Wash items & rate' },
-  { id: 'expenses', label: 'Expenses', icon: '💸', sub: 'Factory kharchay' },
-  { id: 'purchases', label: 'Purchases', icon: '🛒', sub: 'Vendors se khareedari' },
-  { id: 'vendorlist', label: 'Vendors', icon: '🏬', sub: 'Vendor requirements & payable' },
-  { id: 'employees', label: 'Employees', icon: '👷', sub: 'Staff + salary payments' },
-  { id: 'drawings', label: 'Owner Drawings', icon: '🏧', sub: 'Owner ka nikaal' },
-  { id: 'branches', label: 'Branches', icon: '🏢', sub: 'Factory / shop branches' },
-
-  { sec: 'Admin' },
-  { id: 'reports', label: 'Reports', icon: '📈', sub: 'Profit-loss, kg & exports' },
-  { id: 'users', label: 'Users', icon: '🔐', sub: 'Staff logins & permissions' },
+  { sec: 'More' },
+  { id: 'reports', label: 'Reports', icon: '📈', sub: 'Business analysis aur exports' },
+  { id: 'branches', label: 'Branches', icon: '🏢', sub: 'Factory aur shop branches' },
+  { id: 'users', label: 'Users', icon: '🔐', sub: 'Staff logins aur permissions' },
   { id: 'settings', label: 'Settings', icon: '⚙️', sub: 'Shop profile, rate, cloud, backup' }
 ];
 
@@ -68,7 +64,7 @@ const UI = {
 
     const items = NAV.map(n => {
       if (n.sec) return '<div class="nav-sec">' + n.sec + '</div>';
-      if (!DB.can(n.id) && !o.forceAll) return '';
+      if (n.id !== 'logout' && !DB.can(n.id) && !o.forceAll) return '';
       let badge = '';
       if (n.badge === 'inFactory') {
         const c = Biz.inFactory().length;
@@ -87,10 +83,8 @@ const UI = {
       <div class="shell">
         <aside class="sidebar ${this.sidebarOpen ? 'open' : ''}" id="sidebar">
           <div class="brand">
-            <img src="${esc(logo)}" alt="logo" class="brand-logo"/>
-            <div class="brand-txt">
-              <b>${esc(s.shopName || 'Mr Laundry Factory')}</b>
-              <span>Factory Portal</span>
+            <div class="brand-logo-wrap">
+              <img src="assets/img/celinesoft-logo-clean.png" alt="CelineSoft" class="brand-logo-img"/>
             </div>
           </div>
           <nav class="nav" id="mainNav">${items}</nav>
@@ -99,7 +93,7 @@ const UI = {
               <div class="avatar">${esc(initials(u ? u.name : '?'))}</div>
               <div class="sf-txt"><b>${esc(u ? u.name : 'Guest')}</b><span>${esc(u ? titleCase(u.role) : '')}</span></div>
             </div>
-            <button class="btn btn-ghost btn-sm btn-block" id="logoutBtn">🚪 Logout</button>
+            <button class="btn btn-ghost btn-sm btn-block" id="logoutBtn" style="color:#94a3b8;border-color:rgba(255,255,255,0.1);background:rgba(255,255,255,0.05)">🚪 Logout</button>
           </div>
         </aside>
         <div class="side-overlay" id="sideOverlay"></div>
@@ -108,22 +102,21 @@ const UI = {
           <header class="topbar">
             <button class="icon-btn menu-btn" id="menuBtn" title="Menu">☰</button>
             <div class="tb-title">
-              <h1>${esc(o.title || t[0])}</h1>
-              <p>${esc(o.subtitle !== undefined ? o.subtitle : t[1])}</p>
+              <h1>${esc(s.shopName || 'Mr Laundry Factory')} - FACTORY PORTAL</h1>
+              <p>${esc(o.subtitle !== undefined ? o.subtitle : (t[1] || 'Aapke factory ka poora business — aik nazar mein'))}</p>
             </div>
             <div class="tb-actions">
               <div class="gs-wrap">
-                <input class="inp inp-sm gs" id="globalSearch" placeholder="🔍 Search customer / invoice…" autocomplete="off"/>
+                <input class="inp inp-sm gs" id="globalSearch" placeholder="🔍 Search" autocomplete="off"/>
                 <div class="gs-drop" id="gsDrop"></div>
               </div>
-              <button class="icon-btn" id="cloudChip" title="Cloud sync" style="width:auto;padding:0 10px;font-size:12px;font-weight:800">☁️ ${Cloud.statusShort()}</button>
               <button class="icon-btn" id="themeBtn" title="Theme">${this.theme() === 'dark' ? '☀️' : '🌙'}</button>
-              <button class="btn btn-primary btn-sm" id="quickNew">➕ New Sale</button>
+              <button class="btn btn-teal btn-sm" id="quickNew">＋ New Sale</button>
               <button class="icon-btn" id="moreBtn" title="More">⋯</button>
             </div>
           </header>
           <section class="page" id="pageBody">${contentHtml}</section>
-          <footer class="foot">${esc(s.shopName)} · Factory Portal v1.0 · <span id="cloudDot">${Cloud.statusLabel()}</span></footer>
+          <footer class="foot">${esc(s.shopName || 'Mr Laundry Factory')} · Factory Portal · <span id="cloudDot">${Cloud.statusLabel()}</span></footer>
         </main>
       </div>`;
 
@@ -133,10 +126,15 @@ const UI = {
 
   bindLayout(page) {
     const self = this;
-    $$('.nav-item').forEach(a => a.onclick = e => {
+    $$('.nav-item').forEach(a => a.onclick = async e => {
       e.preventDefault();
       self.sidebarOpen = false;
       const sb = $('#sidebar'); if (sb) sb.classList.remove('open');
+      if (a.dataset.page === 'logout') {
+        const yes = await confirmDialog('Logout karna hai?', { title: 'Logout', yes: 'Yes, logout' });
+        if (yes) { DB.logout(); app.go('login'); }
+        return;
+      }
       app.go(a.dataset.page);
     });
     const mb = $('#menuBtn'); if (mb) mb.onclick = () => { this.sidebarOpen = !this.sidebarOpen; $('#sidebar').classList.toggle('open', this.sidebarOpen); $('#sideOverlay').classList.toggle('show', this.sidebarOpen); };
